@@ -1,0 +1,6 @@
+# Omakase Ruby styling
+inherit_gem: { rubocop-rails-omakase: rubocop.yml }
+
+# Disable Rails-specific cops since this is a gem, not a Rails app
+Rails:
+  Enabled: false
