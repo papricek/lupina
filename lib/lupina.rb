@@ -5,6 +5,8 @@ require "ruby_llm"
 require_relative "lupina/version"
 require_relative "lupina/configuration"
 require_relative "lupina/extractor"
+require_relative "lupina/solar_model"
+require_relative "lupina/edc_generator"
 
 module Lupina
   class Error < StandardError; end
@@ -22,6 +24,17 @@ module Lupina
 
     def extract(prompt:, image: nil)
       Extractor.new(prompt: prompt, image: image, model: configuration.model).call
+    end
+
+    def generate_edc(capacity_kwp:, yearly_surplus_kwh:, month:, year: Date.today.year,
+                     consumption_pattern: :afternoon_weekend, ean: "859182400110224391", seed: nil)
+      generator = EdcGenerator.new(
+        capacity_kwp: capacity_kwp, yearly_surplus_kwh: yearly_surplus_kwh,
+        month: month, year: year, consumption_pattern: consumption_pattern,
+        ean: ean, seed: seed
+      )
+      csv = generator.generate
+      { csv: csv, stats: generator.stats }
     end
   end
 end
