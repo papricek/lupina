@@ -28,11 +28,12 @@ module Lupina
     end
 
     def generate_edc(capacity_kwp:, yearly_surplus_kwh:, month:, year: Date.today.year,
-                     consumption_pattern: :afternoon_weekend, ean: "859182400110224391", seed: nil)
+                     consumption_pattern: :afternoon_weekend, consumption_profile: nil,
+                     ean: "859182400110224391", seed: nil)
       generator = EdcGenerator.new(
         capacity_kwp: capacity_kwp, yearly_surplus_kwh: yearly_surplus_kwh,
         month: month, year: year, consumption_pattern: consumption_pattern,
-        ean: ean, seed: seed
+        consumption_profile: consumption_profile, ean: ean, seed: seed
       )
       csv = generator.generate
       { csv: csv, stats: generator.stats }
@@ -45,12 +46,17 @@ module Lupina
     def from_description(description, month:, year: Date.today.year, ean: "859182400110224391", seed: nil)
       params = parse_description(description)
 
+      profile = {
+        weekday: params["weekday_profile"],
+        weekend: params["weekend_profile"]
+      }
+
       if params["type"] == "production"
         result = generate_edc(
           capacity_kwp: params["capacity_kwp"],
           yearly_surplus_kwh: params["yearly_surplus_kwh"],
           month: month, year: year,
-          consumption_pattern: params["consumption_pattern"],
+          consumption_profile: profile,
           ean: ean, seed: seed
         )
         result.merge(parsed: params)

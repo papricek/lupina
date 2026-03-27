@@ -4,10 +4,6 @@ require "json"
 
 module Lupina
   class DescriptionParser
-    AVAILABLE_PATTERNS = %w[
-      minimal afternoon_weekend industrial_lunch_break early_shift residential flat
-    ].freeze
-
     def initialize(description:, model:)
       @description = description
       @model = model
@@ -29,34 +25,45 @@ module Lupina
     def prompt
       <<~PROMPT
         Jsi expert na české fotovoltaické instalace a energetiku.
-        Analyzuj následující popis solární elektrárny nebo odběratele elektřiny a extrahuj strukturované parametry.
+        Analyzuj následující popis solární elektrárny nebo odběratele elektřiny.
 
-        Dostupné vzory spotřeby (consumption_pattern):
-        - "minimal" — téměř nulová místní spotřeba, skoro vše se exportuje do sítě (stodoly, FVE na louce, prázdné budovy)
-        - "afternoon_weekend" — vysoká spotřeba ráno ve všední dny, klesá odpoledne, nízká o víkendech (kanceláře, obchody)
-        - "industrial_lunch_break" — stroje jedou celý den ve všední dny, přetoky jen přes polední pauzu 12-13, víkendy plné přetoky (továrny, dílny s nepřetržitým provozem)
-        - "early_shift" — ranní směna 6-14 ve všední dny, odpolední přetoky + celé víkendy (výroba s ranní směnou, kravíny s ranním dojením)
-        - "residential" — nízká spotřeba přes den (lidi v práci), vysoká večer (rodinné domy, byty, chaty)
-        - "flat" — rovnoměrná spotřeba celý den (serverovny, chlazení, stálý odběr)
+        Tvůj úkol:
+        1. Určit zda jde o výrobnu (production) nebo spotřebitele (consumption)
+        2. Extrahovat číselné parametry
+        3. Vytvořit přesný 24-hodinový profil spotřeby pro všední den a víkend
+
+        Profil spotřeby je pole 24 čísel (index 0 = půlnoc, index 12 = poledne, index 23 = 23:00).
+        Každé číslo je 0.0 až 1.0 kde:
+        - 1.0 = špičková spotřeba (maximum)
+        - 0.0 = žádná spotřeba
+        - hodnoty mezi = poměrná spotřeba
+
+        Příklady profilů:
+        - Pekárna (3-11h): weekday [0,0,0,0.5,0.9,1.0,1.0,1.0,0.9,0.8,0.6,0.2,0,0,0,0,0,0,0,0,0,0,0,0]
+        - Kancelář (8-17h): weekday [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.3,0.8,1.0,1.0,0.9,0.7,0.8,0.9,0.8,0.6,0.2,0.05,0.05,0.05,0.05,0.05,0.05]
+        - Rodinný dům: weekday [0.15,0.1,0.1,0.1,0.1,0.15,0.4,0.6,0.3,0.2,0.15,0.15,0.2,0.15,0.15,0.15,0.3,0.6,0.8,1.0,0.9,0.7,0.4,0.2]
+        - Prázdná stodola: weekday [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
 
         Vrať POUZE validní JSON, bez markdown, bez komentářů:
 
         {
           "type": "production" nebo "consumption",
           "capacity_kwp": číslo nebo null (jen pro production — špičkový výkon FVE v kWp),
-          "yearly_surplus_kwh": číslo nebo null (jen pro production — roční přetoky do sítě v kWh),
+          "yearly_surplus_kwh": číslo nebo null (jen pro production — roční přetoky v kWh),
           "yearly_consumption_kwh": číslo nebo null (jen pro consumption — roční spotřeba v kWh),
-          "consumption_pattern": jeden z #{AVAILABLE_PATTERNS.inspect},
-          "reasoning": "stručné zdůvodnění proč jsi zvolil tento vzor"
+          "weekday_profile": [24 čísel 0.0-1.0, index 0=půlnoc ... index 23=23:00],
+          "weekend_profile": [24 čísel 0.0-1.0, index 0=půlnoc ... index 23=23:00],
+          "reasoning": "stručné zdůvodnění proč profil vypadá takto"
         }
 
         Pravidla:
         - Převeď MWh na kWh (1 MWh = 1000 kWh). Lidi často píšou "MW" místo "MWh".
         - Pokud kapacita není explicitně uvedena ale lze ji odvodit, odvoď ji.
-        - Pokud roční přetoky nejsou uvedeny číslem ale popis naznačuje "všechno jde do sítě", odhadni jako kapacita × 950 kWh/kWp.
-        - Pokud roční spotřeba není uvedena ale je uveden popis, odhadni rozumnou hodnotu.
-        - Vyber consumption_pattern, který nejlépe odpovídá popsanému využití.
-        - U production typu: roční přetoky NESMÍ překročit kapacita × 1000 (to je fyzický limit výroby).
+        - Pokud roční přetoky nejsou uvedeny ale "všechno jde do sítě", odhadni jako kapacita × 950.
+        - weekday_profile a weekend_profile MUSÍ mít přesně 24 hodnot.
+        - Profil musí přesně odrážet popis — pokud stroje jedou 7-17, spotřeba 7-17 je vysoká a mimo to nízká.
+        - Víkendový profil: pokud je objekt zavřený o víkendu, weekend_profile by měl být téměř samé nuly.
+        - Pokud popis zmiňuje stálý odběr (chlazení, servery), přidej odpovídající base load i v noci.
 
         Popis k analýze:
         "#{@description}"
@@ -75,18 +82,22 @@ module Lupina
       type = parsed["type"]
       raise ExtractionError, "Unknown type: #{type}" unless %w[production consumption].include?(type)
 
-      pattern = parsed["consumption_pattern"]
-      unless AVAILABLE_PATTERNS.include?(pattern)
-        raise ExtractionError, "Unknown consumption_pattern: #{pattern}"
-      end
-
       if type == "production"
-        raise ExtractionError, "Missing capacity_kwp for production" unless parsed["capacity_kwp"]
-        raise ExtractionError, "Missing yearly_surplus_kwh for production" unless parsed["yearly_surplus_kwh"]
+        raise ExtractionError, "Missing capacity_kwp" unless parsed["capacity_kwp"]
+        raise ExtractionError, "Missing yearly_surplus_kwh" unless parsed["yearly_surplus_kwh"]
       end
 
       if type == "consumption"
-        raise ExtractionError, "Missing yearly_consumption_kwh for consumption" unless parsed["yearly_consumption_kwh"]
+        raise ExtractionError, "Missing yearly_consumption_kwh" unless parsed["yearly_consumption_kwh"]
+      end
+
+      %w[weekday_profile weekend_profile].each do |key|
+        profile = parsed[key]
+        raise ExtractionError, "Missing #{key}" unless profile.is_a?(Array)
+        raise ExtractionError, "#{key} must have 24 values, got #{profile.size}" unless profile.size == 24
+        unless profile.all? { |v| v.is_a?(Numeric) && v >= 0 && v <= 1.0 }
+          raise ExtractionError, "#{key} values must be 0.0-1.0"
+        end
       end
     end
 
@@ -94,7 +105,8 @@ module Lupina
       parsed["capacity_kwp"] = parsed["capacity_kwp"]&.to_f
       parsed["yearly_surplus_kwh"] = parsed["yearly_surplus_kwh"]&.to_f
       parsed["yearly_consumption_kwh"] = parsed["yearly_consumption_kwh"]&.to_f
-      parsed["consumption_pattern"] = parsed["consumption_pattern"].to_sym
+      parsed["weekday_profile"] = parsed["weekday_profile"].map(&:to_f)
+      parsed["weekend_profile"] = parsed["weekend_profile"].map(&:to_f)
     end
   end
 end
