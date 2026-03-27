@@ -103,7 +103,13 @@ module Lupina
       mid = (interval[:hour_from] + interval[:hour_to]) / 2.0
       base = case @consumption_pattern
       when :afternoon_weekend
-        interval[:weekday] ? weekday_consumption(mid) : weekend_consumption(mid)
+        interval[:weekday] ? afternoon_weekend_wd(mid) : afternoon_weekend_we(mid)
+      when :minimal
+        minimal_consumption(mid)
+      when :industrial_lunch_break
+        interval[:weekday] ? industrial_lunch_wd(mid) : industrial_lunch_we(mid)
+      when :early_shift
+        interval[:weekday] ? early_shift_wd(mid) : early_shift_we(mid)
       when :residential
         residential_consumption(mid, interval[:weekday])
       else
@@ -112,8 +118,9 @@ module Lupina
       base * (0.85 + @rng.rand * 0.30) # ±15 % noise
     end
 
-    # "přetoky hlavně odpoledne a o víkendu" — high morning weekday load, drops in afternoon
-    def weekday_consumption(h)
+    # --- Pattern: afternoon_weekend (high morning weekday, drops afternoon) ---
+
+    def afternoon_weekend_wd(h)
       case h
       when 0...6   then 0.15
       when 6...7   then 0.15 + (h - 6) * 0.55
@@ -128,13 +135,56 @@ module Lupina
       end
     end
 
-    def weekend_consumption(h)
+    def afternoon_weekend_we(h)
       case h
       when 0...7   then 0.10
       when 7...20  then 0.15
       else              0.10
       end
     end
+
+    # --- Pattern: minimal (almost no local consumption, near-pure export) ---
+
+    def minimal_consumption(_h)
+      0.10 # flat small base load (security, standby)
+    end
+
+    # --- Pattern: industrial_lunch_break (weekday full machines, lunch off, weekend nothing) ---
+
+    def industrial_lunch_wd(h)
+      case h
+      when 0...6   then 0.05
+      when 6...7   then 0.50
+      when 7...12  then 1.00   # machines full
+      when 12...13 then 0.08   # lunch — machines OFF
+      when 13...17 then 1.00   # machines full again
+      when 17...18 then 0.30
+      else              0.05
+      end
+    end
+
+    def industrial_lunch_we(_h)
+      0.03 # weekend — security/standby only
+    end
+
+    # --- Pattern: early_shift (production 6-14, then low, weekend nothing) ---
+
+    def early_shift_wd(h)
+      case h
+      when 0...5   then 0.05
+      when 5...6   then 0.30   # prep / arriving
+      when 6...14  then 1.00   # production shift
+      when 14...15 then 0.20   # winding down
+      when 15...22 then 0.08
+      else              0.05
+      end
+    end
+
+    def early_shift_we(_h)
+      0.03 # weekend — nothing
+    end
+
+    # --- Pattern: residential ---
 
     def residential_consumption(h, weekday)
       case h
