@@ -10,6 +10,11 @@ require "fileutils"
 output_dir = File.expand_path("../tmp", __dir__)
 FileUtils.mkdir_p(output_dir)
 
+# Surplus mainly afternoon + weekends
+full_day = Array.new(24, 1.0)
+afternoon_wd = Array.new(24) { |h| h >= 12 && h <= 20 ? 1.0 : 0.0 }
+surplus_profile = { workday: afternoon_wd, saturday: full_day, sunday: full_day }
+
 months = [ 2, 7 ]
 
 months.each do |month|
@@ -18,7 +23,7 @@ months.each do |month|
     yearly_surplus_kwh: 30_000,
     month: month,
     year: 2026,
-    consumption_pattern: :afternoon_weekend,
+    surplus_profile: surplus_profile,
     ean: "859182400110224391",
     seed: 42
   )

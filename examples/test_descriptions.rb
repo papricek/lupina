@@ -14,35 +14,35 @@ end
 descriptions = [
   # Production examples
   { input: "15 kWp na stodole, nikdo tam nebydlí, přetoky 14 MWh ročně",
-    expected: { type: "production", capacity_kwp: 15, yearly_surplus_kwh: 14_000, pattern: :minimal } },
+    expected: { type: "production", capacity_kwp: 15, yearly_surplus_kwh: 14_000 } },
 
   { input: "100 kWp, přetoky 30 MWh za rok, přes týden vše sežereme, max polední pauza když kluci vypnou mašiny",
-    expected: { type: "production", capacity_kwp: 100, yearly_surplus_kwh: 30_000, pattern: :industrial_lunch_break } },
+    expected: { type: "production", capacity_kwp: 100, yearly_surplus_kwh: 30_000 } },
 
   { input: "100 kWp, přetoky 50 MWh za rok, výroba jede od 6 do 14, víkend plné přetoky",
-    expected: { type: "production", capacity_kwp: 100, yearly_surplus_kwh: 50_000, pattern: :early_shift } },
+    expected: { type: "production", capacity_kwp: 100, yearly_surplus_kwh: 50_000 } },
 
   { input: "250 kWp na louce, jen trafostanice žere něco, přetoky 230 MWh ročně",
-    expected: { type: "production", capacity_kwp: 250, yearly_surplus_kwh: 230_000, pattern: :minimal } },
+    expected: { type: "production", capacity_kwp: 250, yearly_surplus_kwh: 230_000 } },
 
   { input: "50 kWp na střeše kanceláří, přetoky hlavně odpoledne a celý víkend, 20 MWh za rok",
-    expected: { type: "production", capacity_kwp: 50, yearly_surplus_kwh: 20_000, pattern: :afternoon_weekend } },
+    expected: { type: "production", capacity_kwp: 50, yearly_surplus_kwh: 20_000 } },
 
   # Consumption examples
   { input: "rodinný dům, 4 MWh ročně, lidi v práci přes den, spotřeba hlavně večer a ráno",
-    expected: { type: "consumption", yearly_consumption_kwh: 4_000, pattern: :residential } },
+    expected: { type: "consumption", yearly_consumption_kwh: 4_000 } },
 
   { input: "pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno, pak zavřeno",
-    expected: { type: "consumption", yearly_consumption_kwh: 25_000, pattern: :early_shift } },
+    expected: { type: "consumption", yearly_consumption_kwh: 25_000 } },
 
   { input: "bytovka, 8 MWh ročně, výtahy a osvětlení, celkem rovnoměrná spotřeba",
-    expected: { type: "consumption", yearly_consumption_kwh: 8_000, pattern: :flat } },
+    expected: { type: "consumption", yearly_consumption_kwh: 8_000 } },
 
   { input: "zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno",
-    expected: { type: "consumption", yearly_consumption_kwh: 60_000, pattern: :early_shift } },
+    expected: { type: "consumption", yearly_consumption_kwh: 60_000 } },
 
   { input: "kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka",
-    expected: { type: "consumption", yearly_consumption_kwh: 40_000, pattern: :early_shift } }
+    expected: { type: "consumption", yearly_consumption_kwh: 40_000 } }
 ]
 
 puts "Testing #{descriptions.size} descriptions through Gemini...\n\n"
@@ -61,9 +61,6 @@ descriptions.each_with_index do |desc, i|
     # Check type
     issues << "type: got #{result['type']}, expected #{exp[:type]}" if result["type"] != exp[:type]
 
-    # Check pattern
-    issues << "pattern: got #{result["consumption_pattern"]}, expected #{exp[:pattern]}" if result["consumption_pattern"] != exp[:pattern]
-
     # Check numbers
     if exp[:type] == "production"
       if result["capacity_kwp"] != exp[:capacity_kwp]
@@ -75,6 +72,13 @@ descriptions.each_with_index do |desc, i|
     else
       if result["yearly_consumption_kwh"] != exp[:yearly_consumption_kwh]
         issues << "consumption: got #{result['yearly_consumption_kwh']}, expected #{exp[:yearly_consumption_kwh]}"
+      end
+    end
+
+    # Check profiles exist and have correct size
+    %w[workday_profile saturday_profile sunday_profile].each do |key|
+      unless result[key].is_a?(Array) && result[key].size == 24
+        issues << "#{key}: missing or wrong size"
       end
     end
 
@@ -90,11 +94,16 @@ descriptions.each_with_index do |desc, i|
 
     # Generate CSV for production examples to verify end-to-end
     if result["type"] == "production"
+      profile = {
+        workday: result["workday_profile"],
+        saturday: result["saturday_profile"],
+        sunday: result["sunday_profile"]
+      }
       edc = Lupina.generate_edc(
         capacity_kwp: result["capacity_kwp"],
         yearly_surplus_kwh: result["yearly_surplus_kwh"],
         month: 7, year: 2026,
-        consumption_pattern: result["consumption_pattern"],
+        surplus_profile: profile,
         seed: 42
       )
       printf "       -> July: %s kWh surplus\n", edc[:stats][:total_surplus_kwh]

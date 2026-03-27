@@ -27,43 +27,58 @@ module Lupina
     def prompt
       <<~PROMPT
         Jsi expert na české fotovoltaické instalace a energetiku.
-        Analyzuj následující popis solární elektrárny nebo odběratele elektřiny.
+        Analyzuj následující popis a extrahuj strukturovaná data.
 
         Tvůj úkol:
         1. Určit zda jde o výrobnu (production) nebo spotřebitele (consumption)
         2. Extrahovat číselné parametry
-        3. Vytvořit přesné 24-hodinové profily MÍSTNÍ SPOTŘEBY zvlášť pro pracovní den, sobotu a neděli
+        3. Vytvořit přesné 24-hodinové profily zvlášť pro pracovní den, sobotu a neděli
 
-        DŮLEŽITÉ: Profily vždy popisují SPOTŘEBU objektu (kolik elektřiny objekt spotřebovává v danou hodinu).
-        Profily NEJSOU přetoky ani výroba — přetoky se počítají až pak jako rozdíl výroby a spotřeby.
-        Pokud "přes týden vše sežereme" → spotřeba ve všední dny je VYSOKÁ (1.0).
-        Pokud "víkend plné přetoky" → spotřeba o víkendu je NÍZKÁ (blízko 0).
+        PRO VÝROBNU (production):
+        Profily popisují PŘETOKY — jaký podíl vyrobené elektřiny jde do sítě v danou hodinu.
+        - 1.0 = veškerá produkce v tu hodinu jde do sítě (žádná místní spotřeba)
+        - 0.5 = polovina produkce do sítě, polovina spotřebována místně
+        - 0.0 = žádné přetoky (vše spotřebováno místně)
+        Generátor automaticky aplikuje solární křivku podle měsíce (v zimě slunce 8-16,
+        v létě 5-21). Profil jen říká "kolik z toho co se vyrobí jde do sítě".
+        Stačí 1.0 pro hodiny kdy přetoky ano, 0 kdy ne. Nemusí mít tvar zvonu.
+        DŮLEŽITÉ: Pokud popis říká přetoky v určitou dobu, KAŽDÝ den daného typu
+        (pracovní/sobota/neděle) bude mít přetoky podle profilu. Žádná náhodnost.
 
-        Profil spotřeby je pole 24 čísel (index 0 = půlnoc, index 12 = poledne, index 23 = 23:00).
-        Každé číslo je 0.0 až 1.0 kde:
-        - 1.0 = špičková spotřeba (stroje jedou naplno, maximum odběru)
-        - 0.0 = žádná spotřeba (zavřeno, vypnuto)
-        - 0.05 = standby (zabezpečení, základní technologie)
+        PRO SPOTŘEBITELE (consumption):
+        Profily popisují SPOTŘEBU objektu.
+        - 1.0 = špičkový odběr (stroje naplno)
+        - 0.05 = standby (zabezpečení)
+        - 0.0 = žádná spotřeba
 
-        Tři profily pokrývají celý týden:
-        - workday_profile: pondělí až pátek (běžný pracovní den)
-        - saturday_profile: sobota (může se lišit — zkrácený provoz, dopolední směna, zavřeno...)
-        - sunday_profile: neděle a svátky (obvykle zavřeno, ale kravín dojí i v neděli)
+        Profil = pole 24 čísel (index 0 = půlnoc, index 12 = poledne, index 23 = 23:00).
+        Tři profily: workday_profile (Po-Pá), saturday_profile, sunday_profile.
 
-        Příklady profilů SPOTŘEBY:
-        - Továrna s polední pauzou (Po-Pá stroje 7-17 s pauzou 12-13, So dopoledne, Ne zavřeno):
-          workday  [0.05,0.05,0.05,0.05,0.05,0.05,0.4,0.9,1.0,1.0,1.0,1.0,0.1,0.9,1.0,1.0,0.6,0.2,0.05,0.05,0.05,0.05,0.05,0.05]
-          saturday [0.05,0.05,0.05,0.05,0.05,0.05,0.4,0.9,1.0,1.0,1.0,0.8,0.2,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-          sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+        Příklady profilů PŘETOKŮ (pro výrobny):
+        - Přetoky jen odpoledne po 15h a o víkendech (stroje jedou do 15:00):
+          workday  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,0.5,0,0,0]
+          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
 
-        - Ranní směna 6-14 (Po-Pá výroba, víkend zavřeno):
-          workday  [0.05,0.05,0.05,0.05,0.05,0.3,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0.3,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-          saturday [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-          sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+        - Přes týden stroje 7-17 s polední pauzou, přetoky jen o pauze a víkendy:
+          workday  [0,0,0,0,0,0,0,0,0,0,0,0,0.8,0,0,0,0,0,0,0,0,0,0,0]
+          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
 
-        - Stodola / FVE na louce (minimální spotřeba, většina jde do sítě):
-          workday  [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-          saturday [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+        - Stodola/louka — nikdo nespotřebovává, plné přetoky vždy:
+          workday  [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+
+        - Ranní směna 6-14, přetoky odpoledne + víkendy:
+          workday  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,1.0,0.5,0,0,0]
+          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+
+        Příklad profilu SPOTŘEBY (pro spotřebitele):
+        - Pekárna 3-11 ráno, víkend zavřeno:
+          workday  [0.05,0.05,0.05,0.3,0.8,1.0,1.0,1.0,1.0,1.0,1.0,0.5,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          saturday [0.05,0.05,0.05,0.3,0.8,1.0,1.0,1.0,1.0,0.5,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
           sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
 
         Vrať POUZE validní JSON, bez markdown, bez komentářů:
@@ -86,8 +101,9 @@ module Lupina
           spočítej: přetoky = (kapacita × 1000) - místní_spotřeba.
         - Pokud popis říká "všechno jde do sítě", odhadni přetoky jako kapacita × 950.
         - Každý profil MUSÍ mít přesně 24 hodnot.
-        - Profily popisují SPOTŘEBU, ne přetoky. Vysoká hodnota = objekt hodně žere.
-        - Sobota se často liší od neděle (zkrácený provoz, dopolední směna, ...).
+        - Pro výrobnu: profily = podíl přetoků (1.0 = vše do sítě).
+        - Pro spotřebitele: profily = úroveň spotřeby (1.0 = maximum odběru).
+        - Sobota se často liší od neděle (zkrácený provoz, dopolední směna...).
         - Zemědělské provozy (kravíny, farmy) mají obvykle stejný profil celý týden.
         - Pokud popis zmiňuje stálý odběr (chlazení, servery), přidej base load i v noci a o víkendu.
 

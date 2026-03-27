@@ -5,31 +5,41 @@
 require "bundler/setup"
 require "lupina"
 
+full_day = Array.new(24, 1.0)
+lunch_only_wd = Array.new(24) { |h| h == 12 ? 0.8 : 0.0 }
+afternoon_wd = Array.new(24) { |h| h >= 14 && h <= 20 ? 1.0 : 0.0 }
+office_wd = Array.new(24) { |h| h >= 12 && h <= 20 ? 1.0 : 0.0 }
+
 examples = [
   {
     name: "1_barn_rooftop",
     label: "1) 15 kWp barn, 14 MWh surplus, minimal consumption",
-    capacity_kwp: 15, yearly_surplus_kwh: 14_000, consumption_pattern: :minimal
+    capacity_kwp: 15, yearly_surplus_kwh: 14_000,
+    surplus_profile: { workday: full_day, saturday: full_day, sunday: full_day }
   },
   {
     name: "2_factory_lunch",
     label: "2) 100 kWp factory, 30 MWh surplus, lunch break only",
-    capacity_kwp: 100, yearly_surplus_kwh: 30_000, consumption_pattern: :industrial_lunch_break
+    capacity_kwp: 100, yearly_surplus_kwh: 30_000,
+    surplus_profile: { workday: lunch_only_wd, saturday: full_day, sunday: full_day }
   },
   {
     name: "3_workshop_early",
     label: "3) 100 kWp workshop, 50 MWh surplus, early shift 6-14",
-    capacity_kwp: 100, yearly_surplus_kwh: 50_000, consumption_pattern: :early_shift
+    capacity_kwp: 100, yearly_surplus_kwh: 50_000,
+    surplus_profile: { workday: afternoon_wd, saturday: full_day, sunday: full_day }
   },
   {
     name: "4_solar_farm",
     label: "4) 250 kWp solar farm, 230 MWh surplus, minimal load",
-    capacity_kwp: 250, yearly_surplus_kwh: 230_000, consumption_pattern: :minimal
+    capacity_kwp: 250, yearly_surplus_kwh: 230_000,
+    surplus_profile: { workday: full_day, saturday: full_day, sunday: full_day }
   },
   {
     name: "5_office_rooftop",
     label: "5) 50 kWp office, 20 MWh surplus, afternoon+weekend",
-    capacity_kwp: 50, yearly_surplus_kwh: 20_000, consumption_pattern: :afternoon_weekend
+    capacity_kwp: 50, yearly_surplus_kwh: 20_000,
+    surplus_profile: { workday: office_wd, saturday: full_day, sunday: full_day }
   }
 ]
 
@@ -44,7 +54,7 @@ examples.each do |ex|
   (1..12).each do |m|
     r = Lupina.generate_edc(
       capacity_kwp: ex[:capacity_kwp], yearly_surplus_kwh: ex[:yearly_surplus_kwh],
-      month: m, year: 2026, consumption_pattern: ex[:consumption_pattern], seed: 42
+      month: m, year: 2026, surplus_profile: ex[:surplus_profile], seed: 42
     )
     yearly_surplus += r[:stats][:total_surplus_kwh]
     yearly_production += r[:stats][:total_production_kwh]
@@ -67,7 +77,7 @@ examples.each do |ex|
   # Spot-check July file
   r = Lupina.generate_edc(
     capacity_kwp: ex[:capacity_kwp], yearly_surplus_kwh: ex[:yearly_surplus_kwh],
-    month: 7, year: 2026, consumption_pattern: ex[:consumption_pattern], seed: 42
+    month: 7, year: 2026, surplus_profile: ex[:surplus_profile], seed: 42
   )
   csv = r[:csv]
   lines = csv.split("\n")

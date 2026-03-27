@@ -33,27 +33,5 @@ module Lupina
       12 => { rise: 7.50, set: 16.00 }
     }.freeze
 
-    # Weather type probabilities by month { clear, partly_cloudy, overcast }
-    WEATHER_DISTRIBUTION = {
-      1  => [ 0.15, 0.35, 0.50 ],
-      2  => [ 0.20, 0.35, 0.45 ],
-      3  => [ 0.25, 0.40, 0.35 ],
-      4  => [ 0.30, 0.40, 0.30 ],
-      5  => [ 0.35, 0.40, 0.25 ],
-      6  => [ 0.35, 0.40, 0.25 ],
-      7  => [ 0.40, 0.35, 0.25 ],
-      8  => [ 0.35, 0.40, 0.25 ],
-      9  => [ 0.30, 0.40, 0.30 ],
-      10 => [ 0.20, 0.40, 0.40 ],
-      11 => [ 0.15, 0.35, 0.50 ],
-      12 => [ 0.10, 0.35, 0.55 ]
-    }.freeze
-
-    # Weather factor ranges [clear, partly_cloudy, overcast]
-    WEATHER_FACTOR_RANGES = [
-      [ 0.80, 1.00 ], # clear
-      [ 0.35, 0.65 ], # partly cloudy
-      [ 0.05, 0.25 ]  # overcast
-    ].freeze
   end
 end

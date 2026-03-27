@@ -57,7 +57,7 @@ setups.each do |setup|
       capacity_kwp: params["capacity_kwp"],
       yearly_surplus_kwh: params["yearly_surplus_kwh"],
       month: month, year: 2026,
-      consumption_profile: profile,
+      surplus_profile: profile,
       seed: 42
     )
 
