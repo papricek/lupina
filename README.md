@@ -143,12 +143,12 @@ Lupina.generate_edc(capacity_kwp: 50, yearly_surplus_kwh: 20_000, consumption_pa
 # yearly_consumption_kwh: 8_000, pattern: :flat
 ```
 
-### 9. Welding shop, machines all day
+### 9. Welding shop, weekday operation
 > **Consumption:** "zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno"
 
 ```ruby
 # TODO: consumption EDC generation
-# yearly_consumption_kwh: 60_000, pattern: :afternoon_weekend
+# yearly_consumption_kwh: 60_000, pattern: :early_shift
 ```
 
 ### 10. Cow barn with morning milking

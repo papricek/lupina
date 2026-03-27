@@ -7,6 +7,7 @@ require_relative "lupina/configuration"
 require_relative "lupina/extractor"
 require_relative "lupina/solar_model"
 require_relative "lupina/edc_generator"
+require_relative "lupina/description_parser"
 
 module Lupina
   class Error < StandardError; end
@@ -35,6 +36,27 @@ module Lupina
       )
       csv = generator.generate
       { csv: csv, stats: generator.stats }
+    end
+
+    def parse_description(description)
+      DescriptionParser.new(description: description, model: configuration.model).call
+    end
+
+    def from_description(description, month:, year: Date.today.year, ean: "859182400110224391", seed: nil)
+      params = parse_description(description)
+
+      if params["type"] == "production"
+        result = generate_edc(
+          capacity_kwp: params["capacity_kwp"],
+          yearly_surplus_kwh: params["yearly_surplus_kwh"],
+          month: month, year: year,
+          consumption_pattern: params["consumption_pattern"],
+          ean: ean, seed: seed
+        )
+        result.merge(parsed: params)
+      else
+        raise Error, "Consumption EDC generation not yet implemented"
+      end
     end
   end
 end
