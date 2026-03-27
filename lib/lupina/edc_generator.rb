@@ -52,8 +52,19 @@ module Lupina
     end
 
     def monthly_surplus_kwh
-      target = @yearly_surplus_kwh * SolarModel::MONTHLY_SURPLUS_SHARE[@month]
-      [ target, monthly_production_kwh * 0.95 ].min
+      @yearly_surplus_kwh * effective_surplus_share
+    end
+
+    # When surplus is a large fraction of production, the monthly surplus
+    # distribution must follow the production curve (you can't export more
+    # than you produce). Blend surplus shares toward production shares
+    # proportionally to the surplus/production ratio.
+    def effective_surplus_share
+      yearly_production = @capacity_kwp * SolarModel::SPECIFIC_YIELD
+      ratio = (@yearly_surplus_kwh / yearly_production).clamp(0.0, 1.0)
+      prod  = SolarModel::MONTHLY_PRODUCTION_SHARE[@month]
+      surp  = SolarModel::MONTHLY_SURPLUS_SHARE[@month]
+      surp * (1 - ratio) + prod * ratio
     end
 
     # --- Interval grid ---
