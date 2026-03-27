@@ -75,78 +75,88 @@ puts result[:stats]
 | `ean` | EAN identifier for the metering point |
 | `seed` | Random seed for reproducible output |
 
-## Example descriptions and how to map them
+## Example descriptions
 
-The idea is that a human writes a short description and you pick the right parameters. Here are 10 real-world examples:
+Each example shows a natural language description as it would come from a human, followed by the extracted parameters. There are two types:
 
-### 1. Small rooftop, almost no self-consumption
-> "15kWp na stodole, nikdo tam nebydlí, všechno jde do sítě"
+- **Production (solar plant)** — always has capacity in **kWp** and yearly přetoky (surplus exported to grid) in **MWh**
+- **Consumption (customer)** — always has yearly consumption in **MWh**
+
+---
+
+### 1. Barn rooftop, no one lives there
+> **Production:** "15 kWp na stodole, nikdo tam nebydlí, přetoky 14 MWh ročně"
 
 ```ruby
 Lupina.generate_edc(capacity_kwp: 15, yearly_surplus_kwh: 14_000, consumption_pattern: :minimal, month: 7)
 ```
 
-### 2. Family house with daytime jobs
-> "10kWp na rodinném domě, přes den nikdo doma, přetoky tak 4MWh za rok"
-
-```ruby
-Lupina.generate_edc(capacity_kwp: 10, yearly_surplus_kwh: 4_000, consumption_pattern: :residential, month: 6)
-```
-
-### 3. Factory running two shifts, lunch break surplus
-> "100kWp, 30MWh přetoky za rok, přes týden vše sežereme, max polední pauza když kluci vypnou mašiny"
+### 2. Factory with lunch break
+> **Production:** "100 kWp, přetoky 30 MWh za rok, přes týden vše sežereme, max polední pauza když kluci vypnou mašiny"
 
 ```ruby
 Lupina.generate_edc(capacity_kwp: 100, yearly_surplus_kwh: 30_000, consumption_pattern: :industrial_lunch_break, month: 7)
 ```
 
-### 4. Workshop with early shift
-> "100kWp, přetoky 50MWh za rok, výroba jede od 6 do 14, víkend plné přetoky"
+### 3. Workshop with early morning shift
+> **Production:** "100 kWp, přetoky 50 MWh za rok, výroba jede od 6 do 14, víkend plné přetoky"
 
 ```ruby
 Lupina.generate_edc(capacity_kwp: 100, yearly_surplus_kwh: 50_000, consumption_pattern: :early_shift, month: 8)
 ```
 
-### 5. Large solar farm, minimal on-site load
-> "250kWp na louce, jen trafostanice žere něco, 230MWh přetoků ročně"
+### 4. Solar farm on a meadow
+> **Production:** "250 kWp na louce, jen trafostanice žere něco, přetoky 230 MWh ročně"
 
 ```ruby
 Lupina.generate_edc(capacity_kwp: 250, yearly_surplus_kwh: 230_000, consumption_pattern: :minimal, month: 6)
 ```
 
-### 6. Office building with weekend emptiness
-> "50kWp na střeše kanceláří, přetoky hlavně odpoledne a celý víkend, asi 20MWh za rok"
+### 5. Office building rooftop
+> **Production:** "50 kWp na střeše kanceláří, přetoky hlavně odpoledne a celý víkend, 20 MWh za rok"
 
 ```ruby
 Lupina.generate_edc(capacity_kwp: 50, yearly_surplus_kwh: 20_000, consumption_pattern: :afternoon_weekend, month: 5)
 ```
 
-### 7. Small workshop, everything consumed
-> "30kWp, svářečky a kompresory jedou celý den, přetoky minimální, tak 2MWh za rok"
+### 6. Family house, everyone at work during the day
+> **Consumption:** "rodinný dům, 4 MWh ročně, lidi v práci přes den, spotřeba hlavně večer a ráno"
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 30, yearly_surplus_kwh: 2_000, consumption_pattern: :industrial_lunch_break, month: 7)
+# TODO: consumption EDC generation
+# yearly_consumption_kwh: 4_000, pattern: :residential
 ```
 
-### 8. Seasonal accommodation
-> "20kWp na chatě, v létě tam někdo je ale hlavně večer, přetoky 8MWh ročně"
+### 7. Small bakery, early morning operation
+> **Consumption:** "pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno, pak zavřeno"
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 20, yearly_surplus_kwh: 8_000, consumption_pattern: :residential, month: 7)
+# TODO: consumption EDC generation
+# yearly_consumption_kwh: 25_000, pattern: :early_shift
 ```
 
-### 9. Agricultural building with morning milking
-> "60kWp na kravíně, ráno dojení a krmení 4-10h, pak klid, přetoky 35MWh"
+### 8. Apartment building common areas
+> **Consumption:** "bytovka, 8 MWh ročně, výtahy a osvětlení, celkem rovnoměrná spotřeba"
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 60, yearly_surplus_kwh: 35_000, consumption_pattern: :early_shift, month: 6)
+# TODO: consumption EDC generation
+# yearly_consumption_kwh: 8_000, pattern: :flat
 ```
 
-### 10. Winter month for a medium system
-> "Chci vidět jak vypadá únor pro 80kWp s přetoky 40MWh ročně, normální kancelář"
+### 9. Welding shop, machines all day
+> **Consumption:** "zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno"
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 80, yearly_surplus_kwh: 40_000, consumption_pattern: :afternoon_weekend, month: 2)
+# TODO: consumption EDC generation
+# yearly_consumption_kwh: 60_000, pattern: :afternoon_weekend
+```
+
+### 10. Cow barn with morning milking
+> **Consumption:** "kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka"
+
+```ruby
+# TODO: consumption EDC generation
+# yearly_consumption_kwh: 40_000, pattern: :early_shift
 ```
 
 ## Solar model
