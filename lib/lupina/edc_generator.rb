@@ -75,8 +75,15 @@ module Lupina
       (1..days_in_month).flat_map do |day|
         date = Date.new(@year, @month, day)
         weekday = !date.saturday? && !date.sunday?
+        day_type = if date.sunday?
+          :sunday
+        elsif date.saturday?
+          :saturday
+        else
+          :workday
+        end
         96.times.map do |i|
-          { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25, weekday: weekday }
+          { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25, weekday: weekday, day_type: day_type }
         end
       end
     end
@@ -115,7 +122,7 @@ module Lupina
     def consumption_shape_at(interval)
       mid = (interval[:hour_from] + interval[:hour_to]) / 2.0
       base = if @consumption_profile
-        profile_value_at(mid, interval[:weekday])
+        profile_value_at(mid, interval[:day_type])
       else
         pattern_value_at(mid, interval[:weekday])
       end
@@ -123,8 +130,8 @@ module Lupina
     end
 
     # Interpolated lookup into custom 24-hour profile
-    def profile_value_at(hour, weekday)
-      arr = weekday ? @consumption_profile[:weekday] : @consumption_profile[:weekend]
+    def profile_value_at(hour, day_type)
+      arr = @consumption_profile[day_type] || @consumption_profile[:workday]
       h = hour.floor % 24
       h_next = (h + 1) % 24
       frac = hour - hour.floor

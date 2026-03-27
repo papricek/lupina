@@ -47,8 +47,9 @@ module Lupina
       params = parse_description(description)
 
       profile = {
-        weekday: params["weekday_profile"],
-        weekend: params["weekend_profile"]
+        workday: params["workday_profile"],
+        saturday: params["saturday_profile"],
+        sunday: params["sunday_profile"]
       }
 
       if params["type"] == "production"
