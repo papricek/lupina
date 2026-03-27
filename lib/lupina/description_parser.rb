@@ -32,33 +32,39 @@ module Lupina
         Tvůj úkol:
         1. Určit zda jde o výrobnu (production) nebo spotřebitele (consumption)
         2. Extrahovat číselné parametry
-        3. Vytvořit přesné 24-hodinové profily spotřeby zvlášť pro pracovní den, sobotu a neděli
+        3. Vytvořit přesné 24-hodinové profily MÍSTNÍ SPOTŘEBY zvlášť pro pracovní den, sobotu a neděli
+
+        DŮLEŽITÉ: Profily vždy popisují SPOTŘEBU objektu (kolik elektřiny objekt spotřebovává v danou hodinu).
+        Profily NEJSOU přetoky ani výroba — přetoky se počítají až pak jako rozdíl výroby a spotřeby.
+        Pokud "přes týden vše sežereme" → spotřeba ve všední dny je VYSOKÁ (1.0).
+        Pokud "víkend plné přetoky" → spotřeba o víkendu je NÍZKÁ (blízko 0).
 
         Profil spotřeby je pole 24 čísel (index 0 = půlnoc, index 12 = poledne, index 23 = 23:00).
         Každé číslo je 0.0 až 1.0 kde:
-        - 1.0 = špičková spotřeba (maximum)
-        - 0.0 = žádná spotřeba
+        - 1.0 = špičková spotřeba (stroje jedou naplno, maximum odběru)
+        - 0.0 = žádná spotřeba (zavřeno, vypnuto)
+        - 0.05 = standby (zabezpečení, základní technologie)
 
         Tři profily pokrývají celý týden:
         - workday_profile: pondělí až pátek (běžný pracovní den)
         - saturday_profile: sobota (může se lišit — zkrácený provoz, dopolední směna, zavřeno...)
         - sunday_profile: neděle a svátky (obvykle zavřeno, ale kravín dojí i v neděli)
 
-        Příklady:
-        - Továrna (Po-Pá plný provoz, So dopoledne, Ne zavřeno):
-          workday  [0.05,0.05,0.05,0.05,0.05,0.05,0.4,0.9,1.0,1.0,1.0,0.8,0.3,0.9,1.0,0.6,0.2,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+        Příklady profilů SPOTŘEBY:
+        - Továrna s polední pauzou (Po-Pá stroje 7-17 s pauzou 12-13, So dopoledne, Ne zavřeno):
+          workday  [0.05,0.05,0.05,0.05,0.05,0.05,0.4,0.9,1.0,1.0,1.0,1.0,0.1,0.9,1.0,1.0,0.6,0.2,0.05,0.05,0.05,0.05,0.05,0.05]
           saturday [0.05,0.05,0.05,0.05,0.05,0.05,0.4,0.9,1.0,1.0,1.0,0.8,0.2,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
           sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
 
-        - Kravín (dojení denně 4-10h, chlazení mléka 24/7):
-          workday  [0.15,0.15,0.15,0.15,1.0,1.0,1.0,1.0,0.9,0.8,0.4,0.3,0.3,0.3,0.3,0.3,0.3,0.3,0.2,0.2,0.15,0.15,0.15,0.15]
-          saturday [0.15,0.15,0.15,0.15,1.0,1.0,1.0,1.0,0.9,0.8,0.4,0.3,0.3,0.3,0.3,0.3,0.3,0.3,0.2,0.2,0.15,0.15,0.15,0.15]
-          sunday   [0.15,0.15,0.15,0.15,1.0,1.0,1.0,1.0,0.9,0.8,0.4,0.3,0.3,0.3,0.3,0.3,0.3,0.3,0.2,0.2,0.15,0.15,0.15,0.15]
+        - Ranní směna 6-14 (Po-Pá výroba, víkend zavřeno):
+          workday  [0.05,0.05,0.05,0.05,0.05,0.3,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0.3,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          saturday [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
 
-        - Rodinný dům (lidi v práci Po-Pá, doma So-Ne):
-          workday  [0.15,0.1,0.1,0.1,0.1,0.15,0.4,0.6,0.3,0.2,0.15,0.15,0.2,0.15,0.15,0.15,0.3,0.6,0.8,1.0,0.9,0.7,0.4,0.2]
-          saturday [0.15,0.1,0.1,0.1,0.1,0.1,0.15,0.2,0.4,0.5,0.6,0.7,0.8,0.7,0.6,0.5,0.5,0.6,0.8,1.0,0.9,0.7,0.4,0.2]
-          sunday   [0.15,0.1,0.1,0.1,0.1,0.1,0.15,0.2,0.3,0.5,0.6,0.7,0.8,0.7,0.6,0.5,0.4,0.5,0.7,0.9,0.8,0.6,0.4,0.2]
+        - Stodola / FVE na louce (minimální spotřeba, většina jde do sítě):
+          workday  [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          saturday [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
 
         Vrať POUZE validní JSON, bez markdown, bez komentářů:
 
@@ -76,9 +82,11 @@ module Lupina
         Pravidla:
         - Převeď MWh na kWh (1 MWh = 1000 kWh). Lidi často píšou "MW" místo "MWh".
         - Pokud kapacita není explicitně uvedena ale lze ji odvodit, odvoď ji.
-        - Pokud roční přetoky nejsou uvedeny ale "všechno jde do sítě", odhadni jako kapacita × 950.
+        - Pokud roční přetoky nejsou uvedeny ale popis říká kolik se spotřebuje místně,
+          spočítej: přetoky = (kapacita × 1000) - místní_spotřeba.
+        - Pokud popis říká "všechno jde do sítě", odhadni přetoky jako kapacita × 950.
         - Každý profil MUSÍ mít přesně 24 hodnot.
-        - Profily musí přesně odrážet popis.
+        - Profily popisují SPOTŘEBU, ne přetoky. Vysoká hodnota = objekt hodně žere.
         - Sobota se často liší od neděle (zkrácený provoz, dopolední směna, ...).
         - Zemědělské provozy (kravíny, farmy) mají obvykle stejný profil celý týden.
         - Pokud popis zmiňuje stálý odběr (chlazení, servery), přidej base load i v noci a o víkendu.
