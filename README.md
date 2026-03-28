@@ -100,7 +100,34 @@ result = Lupina.generate_edc(
 
 If `surplus_profile` is omitted, defaults to full export (all 1.0) — all production goes to grid.
 
+### Consumption EDC
+
+For consumption profiles (no solar plant, just a consumer):
+
+```ruby
+result = Lupina.generate_consumption_edc(
+  yearly_consumption_kwh: 25_000,
+  month: 7,
+  year: 2026,
+  consumption_profile: {
+    workday:  Array.new(24) { |h| h >= 3 && h <= 10 ? 1.0 : 0.05 },  # bakery 3-11am
+    saturday: Array.new(24) { |h| h >= 3 && h <= 9 ? 1.0 : 0.05 },   # shorter Saturday
+    sunday:   Array.new(24, 0.05)                                       # closed
+  },
+  seed: 42
+)
+```
+
+Or via natural language — `from_description` handles both production and consumption automatically:
+
+```ruby
+result = Lupina.from_description("pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno", month: 7)
+# result[:stats] => { total_consumption_kwh: 2123.3, peak_consumption_kw: 14.4, ... }
+```
+
 ## Parameters
+
+### `generate_edc` (production/export)
 
 | Parameter | Description |
 |---|---|
@@ -109,6 +136,17 @@ If `surplus_profile` is omitted, defaults to full export (all 1.0) — all produ
 | `month` | Month to generate (1-12) |
 | `year` | Year (default: current year) |
 | `surplus_profile` | Hash with `:workday`, `:saturday`, `:sunday` keys, each an array of 24 floats (0.0–1.0). Optional — defaults to full export. |
+| `ean` | EAN identifier for the metering point |
+| `seed` | Random seed for reproducible output |
+
+### `generate_consumption_edc` (consumption)
+
+| Parameter | Description |
+|---|---|
+| `yearly_consumption_kwh` | Total energy consumed per year in kWh |
+| `month` | Month to generate (1-12) |
+| `year` | Year (default: current year) |
+| `consumption_profile` | Hash with `:workday`, `:saturday`, `:sunday` keys, each an array of 24 floats (0.0–1.0). Optional — defaults to flat. |
 | `ean` | EAN identifier for the metering point |
 | `seed` | Random seed for reproducible output |
 
@@ -167,26 +205,58 @@ Lupina.from_description("50 kWp na střeše kanceláří, přetoky hlavně odpol
 
 ---
 
-**Consumption (customer)** — has yearly consumption in **MWh**. EDC generation for consumption descriptions is not yet implemented.
+**Consumption (customer)** — has yearly consumption in **MWh**. The LLM extracts the consumption total and generates a consumption profile (when energy is consumed). No solar envelope — consumption can happen at any hour.
 
 ### 6. Family house
 > "rodinný dům, 4 MWh ročně, lidi v práci přes den, spotřeba hlavně večer a ráno"
 
+Morning peak 6-8, low daytime, evening peak 17-21. Weekend spread more evenly.
+
+```ruby
+Lupina.from_description("rodinný dům, 4 MWh ročně, lidi v práci přes den, spotřeba hlavně večer a ráno", month: 7)
+```
+
 ### 7. Small bakery
 > "pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno, pak zavřeno"
+
+Peak 3-11am (ovens), standby rest of day. Shorter Saturday, closed Sunday.
+
+```ruby
+Lupina.from_description("pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno, pak zavřeno", month: 7)
+```
 
 ### 8. Apartment building
 > "bytovka, 8 MWh ročně, výtahy a osvětlení, celkem rovnoměrná spotřeba"
 
+Roughly flat profile with slight morning/evening peaks (elevator usage).
+
+```ruby
+Lupina.from_description("bytovka, 8 MWh ročně, výtahy a osvětlení, celkem rovnoměrná spotřeba", month: 7)
+```
+
 ### 9. Welding shop
 > "zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno"
+
+Peak 7-17 workdays, standby weekends.
+
+```ruby
+Lupina.from_description("zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno", month: 7)
+```
 
 ### 10. Cow barn
 > "kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka"
 
-## Solar model
+Peak 4-10 (milking), base load daytime (cooling), same every day.
 
-The generator uses a parametric model for Czech Republic (50°N):
+```ruby
+Lupina.from_description("kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka", month: 7)
+```
+
+## Generator model
+
+### Production (export)
+
+Uses a parametric solar model for Czech Republic (50°N):
 
 - **Seasonal distribution** — monthly production shares from January (2.5%) to June (14%) peak
 - **Monthly export allocation** — blends production curve with a surplus-weighted curve based on the export/production ratio. High ratio (barn) follows production; low ratio (factory) concentrates export in summer.
@@ -195,6 +265,15 @@ The generator uses a parametric model for Czech Republic (50°N):
 - **Intra-day noise** — ±15% per 15-minute interval
 
 Typical specific yield: ~1000 kWh/kWp/year.
+
+### Consumption
+
+Simpler model — no solar dependency:
+
+- **Monthly allocation** — proportional to days in month (no seasonal weighting)
+- **Consumption profile** — LLM-generated 24-hour pattern describes when consumption happens (can be any hour, including night)
+- **Daily variation** — ±30% random factor per day
+- **Intra-day noise** — ±15% per 15-minute interval
 
 ## Development
 
