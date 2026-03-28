@@ -29,6 +29,12 @@ module Lupina
 
     def generate_edc(capacity_kwp:, yearly_surplus_kwh:, month:, year: Date.today.year,
                      surplus_profile: nil, ean: "859182400110224391", seed: nil)
+      yearly_production = capacity_kwp.to_f * SolarModel::SPECIFIC_YIELD
+      if yearly_surplus_kwh.to_f > yearly_production
+        raise Error, "Yearly export (#{yearly_surplus_kwh} kWh) exceeds estimated production " \
+                     "(#{capacity_kwp} kWp × #{SolarModel::SPECIFIC_YIELD} = #{yearly_production.round(0)} kWh)"
+      end
+
       generator = EdcGenerator.new(
         capacity_kwp: capacity_kwp, yearly_surplus_kwh: yearly_surplus_kwh,
         month: month, year: year, surplus_profile: surplus_profile,

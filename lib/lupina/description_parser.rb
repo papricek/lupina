@@ -29,6 +29,14 @@ module Lupina
         Jsi expert na české fotovoltaické instalace a energetiku.
         Analyzuj následující popis a extrahuj strukturovaná data.
 
+        KONTEXT — jak fungují přetoky:
+        Solární elektrárna vyrobí za rok přibližně kapacita_kWp × 1000 kWh (čistá produkce).
+        Část této elektřiny spotřebuje objekt sám (místní spotřeba), zbytek jde do sítě = PŘETOKY.
+        Přetoky = produkce - místní spotřeba. Zákazník nám sdělí roční přetoky z loňska,
+        abychom mohli odhadnout přetoky pro každý měsíc (v létě víc, v zimě míň).
+        Profil přetoků říká KDY během dne přetoky nastávají — závisí na tom,
+        kdy objekt spotřebovává a kdy ne.
+
         Tvůj úkol:
         1. Určit zda jde o výrobnu (production) nebo spotřebitele (consumption)
         2. Extrahovat číselné parametry
@@ -44,6 +52,13 @@ module Lupina
         Stačí 1.0 pro hodiny kdy přetoky ano, 0 kdy ne. Nemusí mít tvar zvonu.
         DŮLEŽITÉ: Pokud popis říká přetoky v určitou dobu, KAŽDÝ den daného typu
         (pracovní/sobota/neděle) bude mít přetoky podle profilu. Žádná náhodnost.
+
+        OVĚŘENÍ KONZISTENCE: Spočítej poměr přetoků k produkci:
+        poměr = roční_přetoky / (kapacita × 1000).
+        - Poměr blízko 1.0 (>0.8) → minimální spotřeba, profily skoro všude 1.0
+        - Poměr 0.3-0.8 → střední spotřeba, profily odpovídají popisu
+        - Poměr <0.3 → vysoká spotřeba, přetoky jen ve špičkách (pauza, víkend)
+        Profily musí být konzistentní s tímto poměrem.
 
         PRO SPOTŘEBITELE (consumption):
         Profily popisují SPOTŘEBU objektu.
@@ -100,6 +115,8 @@ module Lupina
         - Pokud roční přetoky nejsou uvedeny ale popis říká kolik se spotřebuje místně,
           spočítej: přetoky = (kapacita × 1000) - místní_spotřeba.
         - Pokud popis říká "všechno jde do sítě", odhadni přetoky jako kapacita × 950.
+        - Roční přetoky nemohou překročit roční produkci (kapacita × 1000).
+          Pokud zadaná čísla nedávají smysl, upozorni v reasoning.
         - Každý profil MUSÍ mít přesně 24 hodnot.
         - Pro výrobnu: profily = podíl přetoků (1.0 = vše do sítě).
         - Pro spotřebitele: profily = úroveň spotřeby (1.0 = maximum odběru).
