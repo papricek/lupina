@@ -4,6 +4,38 @@ Synthetic EDC data generator for Czech solar plants. Takes a natural language de
 
 **Natural language in, realistic time-series out.**
 
+## How it works
+
+A solar plant with a given **capacity (kWp)** produces roughly 1 MWh per kWp per year in Czech Republic. Part of this production is consumed locally by the building/facility, and the rest is **exported to the grid** — in Czech called **přetoky**.
+
+```
+production ≈ capacity_kWp × 1000 kWh/year
+přetoky (export) = production − local consumption
+```
+
+The customer provides:
+
+1. **Capacity (kWp)** — peak power of the solar plant, determines total production
+2. **Yearly export (přetoky)** — last year's total export to grid in kWh, used to calibrate monthly predictions
+3. **Export characteristics** — natural language description of when export happens (e.g. "only afternoons and weekends", "everything goes to grid")
+
+Lupina uses the Gemini LLM to extract these parameters and generate an **export profile** — a 24-hour pattern describing what fraction of production is exported at each hour, separately for workdays, Saturdays, and Sundays.
+
+The generator then distributes the monthly export total across 15-minute intervals, shaped by:
+- **Export profile** — when export happens (from consumption characteristics)
+- **Solar envelope** — sin curve between sunrise/sunset for the given month (50°N latitude)
+- **Seasonal weighting** — summer months get more export than winter
+- **Daily variation** — ±30% per day for realistic day-to-day differences
+
+The output is a CSV in the standard EDC format:
+
+```
+Datum;Cas od;Cas do;IN-859182400110224391-D;OUT-859182400110224391-D
+01.07.2026;00:00;00:15;0,0;0,0;
+01.07.2026;12:00;12:15;8,93;8,93;
+...
+```
+
 ## Installation
 
 Add this line to your application's Gemfile:
@@ -16,158 +48,151 @@ And then execute:
 
     $ bundle install
 
-## How it works
-
-1. You describe a solar installation in plain Czech/English — capacity, yearly surplus, consumption pattern
-2. Lupina maps that to a parametric solar model (50°N latitude, Czech weather, seasonal curves)
-3. It generates a month of 15-min interval data calibrated to match the yearly totals
-
-The output is a CSV in the standard EDC format:
-
-```
-Datum;Cas od;Cas do;IN-859182400110224391-D;OUT-859182400110224391-D
-01.07.2026;00:00;00:15;0,0;0,0;
-01.07.2026;12:00;12:15;8,93;8,93;
-...
-```
-
 ## Usage
+
+### From natural language (recommended)
+
+The simplest way — describe the installation in plain Czech and let the LLM handle everything:
 
 ```ruby
 require 'lupina'
 
-result = Lupina.generate_edc(
-  capacity_kwp: 100,
-  yearly_surplus_kwh: 30_000,
-  month: 7,
-  year: 2026,
-  consumption_pattern: :industrial_lunch_break,
-  ean: "859182400110224391",
-  seed: 42  # optional, for reproducibility
+Lupina.configure do |config|
+  config.gemini_api_key = ENV['GEMINI_API_KEY']
+end
+
+result = Lupina.from_description(
+  "100 kWp, přetoky 30 MWh za rok, přes týden vše sežereme, max polední pauza",
+  month: 7, year: 2026, seed: 42
 )
 
 File.write("output.csv", result[:csv])
 puts result[:stats]
 # => { month: 7, year: 2026, days: 31, capacity_kwp: 100.0,
-#      total_surplus_kwh: 4949.6, peak_surplus_kw: 66.5, ... }
+#      total_surplus_kwh: 4680.0, total_production_kwh: 13500.0, ... }
+puts result[:parsed]["reasoning"]
 ```
 
-## Consumption patterns
+### With explicit export profile
 
-| Pattern | Description |
-|---|---|
-| `:minimal` | Near-zero local consumption, almost all production exported |
-| `:afternoon_weekend` | High weekday morning load, surplus appears in afternoon and all day on weekends |
-| `:industrial_lunch_break` | Machines run all day, surplus only during lunch break (12-13) and weekends |
-| `:early_shift` | Production shift 6-14, surplus from afternoon onwards + full weekends |
-| `:residential` | Low daytime (people at work), high evening consumption |
-| `:flat` | Even consumption throughout the day |
+You can also provide the export profile directly, without the LLM:
+
+```ruby
+# Export profile: fraction of production exported at each hour (0.0–1.0)
+# The generator applies the solar envelope automatically — just say when export happens.
+full_day = Array.new(24, 1.0)
+afternoon_only = Array.new(24) { |h| h >= 14 && h <= 20 ? 1.0 : 0.0 }
+
+result = Lupina.generate_edc(
+  capacity_kwp: 100,
+  yearly_surplus_kwh: 50_000,
+  month: 7,
+  year: 2026,
+  surplus_profile: {
+    workday:  afternoon_only,  # export only after shift ends at 14:00
+    saturday: full_day,        # full export all day
+    sunday:   full_day         # full export all day
+  },
+  ean: "859182400110224391",
+  seed: 42
+)
+```
+
+If `surplus_profile` is omitted, defaults to full export (all 1.0) — all production goes to grid.
 
 ## Parameters
 
 | Parameter | Description |
 |---|---|
 | `capacity_kwp` | Peak capacity of the solar plant in kWp |
-| `yearly_surplus_kwh` | Total energy exported to grid per year in kWh |
+| `yearly_surplus_kwh` | Total energy exported to grid per year in kWh (přetoky). Must not exceed capacity × 1000. |
 | `month` | Month to generate (1-12) |
 | `year` | Year (default: current year) |
-| `consumption_pattern` | One of the patterns above (default: `:afternoon_weekend`) |
+| `surplus_profile` | Hash with `:workday`, `:saturday`, `:sunday` keys, each an array of 24 floats (0.0–1.0). Optional — defaults to full export. |
 | `ean` | EAN identifier for the metering point |
 | `seed` | Random seed for reproducible output |
 
 ## Example descriptions
 
-Each example shows a natural language description as it would come from a human, followed by the extracted parameters. There are two types:
+Each example shows a natural language description as it would come from a customer. The LLM extracts capacity, yearly export, and generates the export profile automatically.
 
-- **Production (solar plant)** — always has capacity in **kWp** and yearly přetoky (surplus exported to grid) in **MWh**
-- **Consumption (customer)** — always has yearly consumption in **MWh**
+**Production (solar plant)** — has capacity in **kWp** and yearly přetoky (export) in **MWh**:
 
 ---
 
 ### 1. Barn rooftop, no one lives there
-> **Production:** "15 kWp na stodole, nikdo tam nebydlí, přetoky 14 MWh ročně"
+> "15 kWp na stodole, nikdo tam nebydlí, přetoky 14 MWh ročně"
+
+Export ratio: 14/15 = 93% — almost everything exported. Profile: all 1.0.
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 15, yearly_surplus_kwh: 14_000, consumption_pattern: :minimal, month: 7)
+Lupina.from_description("15 kWp na stodole, nikdo tam nebydlí, přetoky 14 MWh ročně", month: 7)
 ```
 
 ### 2. Factory with lunch break
-> **Production:** "100 kWp, přetoky 30 MWh za rok, přes týden vše sežereme, max polední pauza když kluci vypnou mašiny"
+> "100 kWp, přetoky 30 MWh za rok, přes týden vše sežereme, max polední pauza když kluci vypnou mašiny"
+
+Export ratio: 30/100 = 30% — high consumption. Workday export only during lunch (12-13) + weekends.
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 100, yearly_surplus_kwh: 30_000, consumption_pattern: :industrial_lunch_break, month: 7)
+Lupina.from_description("100 kWp, přetoky 30 MWh za rok, přes týden vše sežereme, max polední pauza", month: 7)
 ```
 
 ### 3. Workshop with early morning shift
-> **Production:** "100 kWp, přetoky 50 MWh za rok, výroba jede od 6 do 14, víkend plné přetoky"
+> "100 kWp, přetoky 50 MWh za rok, výroba jede od 6 do 14, víkend plné přetoky"
+
+Export ratio: 50/100 = 50%. Workday export from 14:00 onwards + full weekends.
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 100, yearly_surplus_kwh: 50_000, consumption_pattern: :early_shift, month: 8)
+Lupina.from_description("100 kWp, přetoky 50 MWh za rok, výroba jede od 6 do 14, víkend plné přetoky", month: 8)
 ```
 
 ### 4. Solar farm on a meadow
-> **Production:** "250 kWp na louce, jen trafostanice žere něco, přetoky 230 MWh ročně"
+> "250 kWp na louce, jen trafostanice žere něco, přetoky 230 MWh ročně"
+
+Export ratio: 230/250 = 92% — minimal consumption. Profile: all 1.0.
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 250, yearly_surplus_kwh: 230_000, consumption_pattern: :minimal, month: 6)
+Lupina.from_description("250 kWp na louce, jen trafostanice žere něco, přetoky 230 MWh ročně", month: 6)
 ```
 
 ### 5. Office building rooftop
-> **Production:** "50 kWp na střeše kanceláří, přetoky hlavně odpoledne a celý víkend, 20 MWh za rok"
+> "50 kWp na střeše kanceláří, přetoky hlavně odpoledne a celý víkend, 20 MWh za rok"
+
+Export ratio: 20/50 = 40%. Workday export from ~15:00 + full weekends.
 
 ```ruby
-Lupina.generate_edc(capacity_kwp: 50, yearly_surplus_kwh: 20_000, consumption_pattern: :afternoon_weekend, month: 5)
+Lupina.from_description("50 kWp na střeše kanceláří, přetoky hlavně odpoledne a celý víkend, 20 MWh za rok", month: 5)
 ```
 
-### 6. Family house, everyone at work during the day
-> **Consumption:** "rodinný dům, 4 MWh ročně, lidi v práci přes den, spotřeba hlavně večer a ráno"
+---
 
-```ruby
-# TODO: consumption EDC generation
-# yearly_consumption_kwh: 4_000, pattern: :residential
-```
+**Consumption (customer)** — has yearly consumption in **MWh**. EDC generation for consumption descriptions is not yet implemented.
 
-### 7. Small bakery, early morning operation
-> **Consumption:** "pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno, pak zavřeno"
+### 6. Family house
+> "rodinný dům, 4 MWh ročně, lidi v práci přes den, spotřeba hlavně večer a ráno"
 
-```ruby
-# TODO: consumption EDC generation
-# yearly_consumption_kwh: 25_000, pattern: :early_shift
-```
+### 7. Small bakery
+> "pekárna, spotřeba 25 MWh ročně, jedou od 3 do 11 ráno, pak zavřeno"
 
-### 8. Apartment building common areas
-> **Consumption:** "bytovka, 8 MWh ročně, výtahy a osvětlení, celkem rovnoměrná spotřeba"
+### 8. Apartment building
+> "bytovka, 8 MWh ročně, výtahy a osvětlení, celkem rovnoměrná spotřeba"
 
-```ruby
-# TODO: consumption EDC generation
-# yearly_consumption_kwh: 8_000, pattern: :flat
-```
+### 9. Welding shop
+> "zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno"
 
-### 9. Welding shop, weekday operation
-> **Consumption:** "zámečnická dílna, spotřeba 60 MWh ročně, svářečky a kompresory jedou 7-17, víkend zavřeno"
-
-```ruby
-# TODO: consumption EDC generation
-# yearly_consumption_kwh: 60_000, pattern: :early_shift
-```
-
-### 10. Cow barn with morning milking
-> **Consumption:** "kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka"
-
-```ruby
-# TODO: consumption EDC generation
-# yearly_consumption_kwh: 40_000, pattern: :early_shift
-```
+### 10. Cow barn
+> "kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka"
 
 ## Solar model
 
 The generator uses a parametric model for Czech Republic (50°N):
 
 - **Seasonal distribution** — monthly production shares from January (2.5%) to June (14%) peak
-- **Daily curve** — sine-based solar profile between sunrise/sunset (with DST)
-- **Weather** — random daily weather type (clear/partly/overcast) with seasonal probabilities
-- **Noise** — ±15% intra-day cloud variation on both production and consumption
-- **Calibration** — binary search scales consumption so monthly surplus matches the yearly target
+- **Monthly export allocation** — blends production curve with a surplus-weighted curve based on the export/production ratio. High ratio (barn) follows production; low ratio (factory) concentrates export in summer.
+- **Solar envelope** — sine curve between sunrise/sunset per month (accounts for DST)
+- **Daily variation** — ±30% random factor per day for realistic differences
+- **Intra-day noise** — ±15% per 15-minute interval
 
 Typical specific yield: ~1000 kWh/kWp/year.
 
