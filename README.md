@@ -252,6 +252,26 @@ Peak 4-10 (milking), base load daytime (cooling), same every day.
 Lupina.from_description("kravín, spotřeba 40 MWh za rok, dojení a krmení 4-10h, pak jen chlazení mléka", month: 7)
 ```
 
+## Sample EDC files
+
+Pre-generated EDC files (July 2026) for 10 diverse scenarios — download and inspect:
+
+**Production (export):**
+- [P1 — Supermarket 200 kWp, 40 MWh](examples/scenarios/P1_supermarket_07_2026.csv) — low export ratio (20%), workday noon only + weekend afternoon
+- [P2 — Garage 30 kWp, 27 MWh](examples/scenarios/P2_garaz_07_2026.csv) — high export ratio (90%), full export all day
+- [P3 — Sawmill 80 kWp, 15 MWh](examples/scenarios/P3_pila_07_2026.csv) — very low ratio (19%), workday after 16h + Sunday
+- [P4 — Auto repair 45 kWp, 25 MWh](examples/scenarios/P4_autoservis_07_2026.csv) — medium ratio (56%), workday after 16h + weekends
+- [P5 — School 150 kWp, 100 MWh](examples/scenarios/P5_skola_07_2026.csv) — high ratio (67%), workday after 15h + weekends
+
+**Consumption:**
+- [C1 — Server room 120 MWh](examples/scenarios/C1_serverovna_07_2026.csv) — flat 24/7
+- [C2 — Restaurant 35 MWh](examples/scenarios/C2_restaurace_07_2026.csv) — Tue-Sat 9-22, closed Sun+Mon
+- [C3 — Fitness 50 MWh](examples/scenarios/C3_fitness_07_2026.csv) — bimodal 6-9 + 16-22
+- [C4 — Night bakery 30 MWh](examples/scenarios/C4_nocni_pekarna_07_2026.csv) — peak 22-06, low daytime
+- [C5 — Small shop 8 MWh](examples/scenarios/C5_obchod_07_2026.csv) — Mon-Sat 8-18, Sunday off
+
+See [scenarios.md](scenarios.md) for full Czech descriptions and expected behavior of each scenario.
+
 ## Generator model
 
 ### Production (export)
