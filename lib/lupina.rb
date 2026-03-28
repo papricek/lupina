@@ -7,6 +7,7 @@ require_relative "lupina/configuration"
 require_relative "lupina/extractor"
 require_relative "lupina/solar_model"
 require_relative "lupina/edc_generator"
+require_relative "lupina/consumption_edc_generator"
 require_relative "lupina/description_parser"
 
 module Lupina
@@ -44,6 +45,17 @@ module Lupina
       { csv: csv, stats: generator.stats }
     end
 
+    def generate_consumption_edc(yearly_consumption_kwh:, month:, year: Date.today.year,
+                                 consumption_profile: nil, ean: "859182400110224391", seed: nil)
+      generator = ConsumptionEdcGenerator.new(
+        yearly_consumption_kwh: yearly_consumption_kwh,
+        month: month, year: year, consumption_profile: consumption_profile,
+        ean: ean, seed: seed
+      )
+      csv = generator.generate
+      { csv: csv, stats: generator.stats }
+    end
+
     def parse_description(description)
       DescriptionParser.new(description: description, model: configuration.model).call
     end
@@ -67,7 +79,13 @@ module Lupina
         )
         result.merge(parsed: params)
       else
-        raise Error, "Consumption EDC generation not yet implemented"
+        result = generate_consumption_edc(
+          yearly_consumption_kwh: params["yearly_consumption_kwh"],
+          month: month, year: year,
+          consumption_profile: profile,
+          ean: ean, seed: seed
+        )
+        result.merge(parsed: params)
       end
     end
   end
