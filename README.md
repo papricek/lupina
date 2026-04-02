@@ -135,7 +135,7 @@ result = Lupina.from_description("pekárna, spotřeba 25 MWh ročně, jedou od 3
 | `yearly_surplus_kwh` | Total energy exported to grid per year in kWh (přetoky). Must not exceed capacity × 1000. |
 | `month` | Month to generate (1-12) |
 | `year` | Year (default: current year) |
-| `surplus_profile` | Hash with `:workday`, `:saturday`, `:sunday` keys, each an array of 24 floats (0.0–1.0). Optional — defaults to full export. |
+| `surplus_profile` | Hash with 7 weekday keys (`:monday` through `:sunday`), each an array of 24 floats (0.0–1.0). Optional — defaults to full export. |
 | `ean` | EAN identifier for the metering point |
 | `seed` | Random seed for reproducible output |
 
@@ -146,7 +146,7 @@ result = Lupina.from_description("pekárna, spotřeba 25 MWh ročně, jedou od 3
 | `yearly_consumption_kwh` | Total energy consumed per year in kWh |
 | `month` | Month to generate (1-12) |
 | `year` | Year (default: current year) |
-| `consumption_profile` | Hash with `:workday`, `:saturday`, `:sunday` keys, each an array of 24 floats (0.0–1.0). Optional — defaults to flat. |
+| `consumption_profile` | Hash with 7 weekday keys (`:monday` through `:sunday`), each an array of 24 floats (0.0–1.0). Optional — defaults to flat. |
 | `ean` | EAN identifier for the metering point |
 | `seed` | Random seed for reproducible output |
 

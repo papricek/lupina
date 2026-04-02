@@ -6,7 +6,9 @@ module Lupina
   class EdcGenerator
     attr_reader :stats
 
-    # surplus_profile: { workday: [24 floats], saturday: [24 floats], sunday: [24 floats] }
+    WEEKDAY_KEYS = %i[sunday monday tuesday wednesday thursday friday saturday].freeze
+
+    # surplus_profile: { monday: [24 floats], tuesday: ..., sunday: [24 floats] }
     #   Each value 0.0–1.0: fraction of solar production that becomes surplus at that hour.
     #   The generator applies a solar envelope per month to shape the output realistically.
     #   If nil, defaults to full surplus (1.0 all day) — all production goes to grid.
@@ -51,7 +53,7 @@ module Lupina
 
     def default_surplus_profile
       flat = Array.new(24, 1.0)
-      { workday: flat, saturday: flat, sunday: flat }
+      WEEKDAY_KEYS.each_with_object({}) { |day, h| h[day] = flat }
     end
 
     def days_in_month
@@ -82,13 +84,7 @@ module Lupina
     def build_intervals
       (1..days_in_month).flat_map do |day|
         date = Date.new(@year, @month, day)
-        day_type = if date.sunday?
-          :sunday
-        elsif date.saturday?
-          :saturday
-        else
-          :workday
-        end
+        day_type = WEEKDAY_KEYS[date.wday]
         96.times.map do |i|
           { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25, day_type: day_type }
         end
@@ -107,7 +103,7 @@ module Lupina
     # --- Surplus profile lookup (interpolated) ---
 
     def surplus_profile_at(hour, day_type)
-      arr = @surplus_profile[day_type] || @surplus_profile[:workday]
+      arr = @surplus_profile[day_type] || @surplus_profile[:monday]
       h = hour.floor % 24
       h_next = (h + 1) % 24
       frac = hour - hour.floor

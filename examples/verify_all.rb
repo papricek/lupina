@@ -104,16 +104,16 @@ examples.each_with_index do |ex, idx|
     puts "   July peak: #{result[:stats][:peak_consumption_kw]} kW"
   end
 
-  # Show profiles
-  wd = params["workday_profile"]
+  # Show profiles (Monday as workday representative)
+  mo = params["monday_profile"]
   sa = params["saturday_profile"]
   su = params["sunday_profile"]
   puts
-  puts "   Hour  Workday                  Saturday                 Sunday"
+  puts "   Hour  Monday                   Saturday                 Sunday"
   24.times do |h|
     printf "   %02d:00 %4.2f %-24s  %4.2f %-24s  %4.2f %s\n",
       h,
-      wd[h], "#" * (wd[h] * 20).round,
+      mo[h], "#" * (mo[h] * 20).round,
       sa[h], "#" * (sa[h] * 20).round,
       su[h], "#" * (su[h] * 20).round
   end

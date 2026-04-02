@@ -4,7 +4,8 @@ require "json"
 
 module Lupina
   class DescriptionParser
-    PROFILE_KEYS = %w[workday_profile saturday_profile sunday_profile].freeze
+    WEEKDAYS = %w[monday tuesday wednesday thursday friday saturday sunday].freeze
+    PROFILE_KEYS = WEEKDAYS.map { |d| "#{d}_profile" }.freeze
 
     def initialize(description:, model:)
       @description = description
@@ -40,7 +41,7 @@ module Lupina
         Tvůj úkol:
         1. Určit zda jde o výrobnu (production) nebo spotřebitele (consumption)
         2. Extrahovat číselné parametry
-        3. Vytvořit přesné 24-hodinové profily zvlášť pro pracovní den, sobotu a neděli
+        3. Vytvořit přesné 24-hodinové profily ZVLÁŠŤ PRO KAŽDÝ DEN V TÝDNU (Po, Út, St, Čt, Pá, So, Ne)
 
         PRO VÝROBNU (production):
         Profily popisují PŘETOKY — jaký podíl vyrobené elektřiny jde do sítě v danou hodinu.
@@ -67,34 +68,44 @@ module Lupina
         - 0.0 = žádná spotřeba
 
         Profil = pole 24 čísel (index 0 = půlnoc, index 12 = poledne, index 23 = 23:00).
-        Tři profily: workday_profile (Po-Pá), saturday_profile, sunday_profile.
+        Sedm profilů — jeden pro KAŽDÝ den v týdnu:
+        monday_profile, tuesday_profile, wednesday_profile, thursday_profile,
+        friday_profile, saturday_profile, sunday_profile.
+        Pokud mají některé dny stejný profil, prostě opakuj stejné pole.
+        Díky tomu lze vyjádřit JAKÝKOLIV rozvrh (např. přetoky jen ve středu a o víkendu).
 
         Příklady profilů PŘETOKŮ (pro výrobny):
-        - Přetoky jen odpoledne po 15h a o víkendech (stroje jedou do 15:00):
-          workday  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,0.5,0,0,0]
-          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
-          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+        FULL = [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+        ZERO = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 
-        - Přes týden stroje 7-17 s polední pauzou, přetoky jen o pauze a víkendy:
-          workday  [0,0,0,0,0,0,0,0,0,0,0,0,0.8,0,0,0,0,0,0,0,0,0,0,0]
-          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
-          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+        - Přetoky jen odpoledne po 15h a o víkendech (stroje jedou Po-Pá do 15:00):
+          Po-Pá   [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,0.5,0,0,0]
+          So+Ne    FULL
+
+        - Přetoky jen o víkendech a ve středu celý den (Po,Út,Čt,Pá plná spotřeba):
+          Po       ZERO
+          Út       ZERO
+          St       FULL
+          Čt       ZERO
+          Pá       ZERO
+          So       FULL
+          Ne       FULL
 
         - Stodola/louka — nikdo nespotřebovává, plné přetoky vždy:
-          workday  [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
-          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
-          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          Po-Ne    FULL (všech 7 profilů stejných)
 
         - Ranní směna 6-14, přetoky odpoledne + víkendy:
-          workday  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,1.0,0.5,0,0,0]
-          saturday [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
-          sunday   [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
+          Po-Pá   [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,1.0,0.5,0,0,0]
+          So+Ne    FULL
 
         Příklad profilu SPOTŘEBY (pro spotřebitele):
         - Pekárna 3-11 ráno, víkend zavřeno:
-          workday  [0.05,0.05,0.05,0.3,0.8,1.0,1.0,1.0,1.0,1.0,1.0,0.5,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-          saturday [0.05,0.05,0.05,0.3,0.8,1.0,1.0,1.0,1.0,0.5,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-          sunday   [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          Po-Pá   [0.05,0.05,0.05,0.3,0.8,1.0,1.0,1.0,1.0,1.0,1.0,0.5,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          So       [0.05,0.05,0.05,0.3,0.8,1.0,1.0,1.0,1.0,0.5,0.1,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+          Ne       [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+
+        DŮLEŽITÉ: V příkladech výše je zkrácený zápis (Po-Pá, FULL, ZERO).
+        V JSON odpovědi MUSÍŠ vždy vypsat všech 7 profilů jako plné pole 24 čísel!
 
         Vrať POUZE validní JSON, bez markdown, bez komentářů:
 
@@ -103,7 +114,11 @@ module Lupina
           "capacity_kwp": číslo nebo null (jen pro production — špičkový výkon FVE v kWp),
           "yearly_surplus_kwh": číslo nebo null (jen pro production — roční přetoky v kWh),
           "yearly_consumption_kwh": číslo nebo null (jen pro consumption — roční spotřeba v kWh),
-          "workday_profile": [24 čísel 0.0-1.0],
+          "monday_profile": [24 čísel 0.0-1.0],
+          "tuesday_profile": [24 čísel 0.0-1.0],
+          "wednesday_profile": [24 čísel 0.0-1.0],
+          "thursday_profile": [24 čísel 0.0-1.0],
+          "friday_profile": [24 čísel 0.0-1.0],
           "saturday_profile": [24 čísel 0.0-1.0],
           "sunday_profile": [24 čísel 0.0-1.0],
           "reasoning": "stručné zdůvodnění proč profily vypadají takto"
@@ -117,12 +132,14 @@ module Lupina
         - Pokud popis říká "všechno jde do sítě", odhadni přetoky jako kapacita × 950.
         - Roční přetoky nemohou překročit roční produkci (kapacita × 1000).
           Pokud zadaná čísla nedávají smysl, upozorni v reasoning.
-        - Každý profil MUSÍ mít přesně 24 hodnot.
+        - Každý profil MUSÍ mít přesně 24 hodnot. MUSÍ být přesně 7 profilů (Po-Ne).
         - Pro výrobnu: profily = podíl přetoků (1.0 = vše do sítě).
         - Pro spotřebitele: profily = úroveň spotřeby (1.0 = maximum odběru).
         - Sobota se často liší od neděle (zkrácený provoz, dopolední směna...).
         - Zemědělské provozy (kravíny, farmy) mají obvykle stejný profil celý týden.
         - Pokud popis zmiňuje stálý odběr (chlazení, servery), přidej base load i v noci a o víkendu.
+        - Pokud popis specifikuje konkrétní dny (např. "jen ve středu"), nastav profil POUZE
+          pro tyto dny a ostatní dny nastav na nulu (nebo naopak podle kontextu).
 
         Popis k analýze:
         "#{@description}"

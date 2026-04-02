@@ -63,11 +63,9 @@ module Lupina
     def from_description(description, month:, year: Date.today.year, ean: "859182400110224391", seed: nil)
       params = parse_description(description)
 
-      profile = {
-        workday: params["workday_profile"],
-        saturday: params["saturday_profile"],
-        sunday: params["sunday_profile"]
-      }
+      profile = DescriptionParser::WEEKDAYS.each_with_object({}) do |day, h|
+        h[day.to_sym] = params["#{day}_profile"]
+      end
 
       if params["type"] == "production"
         result = generate_edc(

@@ -6,7 +6,9 @@ module Lupina
   class ConsumptionEdcGenerator
     attr_reader :stats
 
-    # consumption_profile: { workday: [24 floats], saturday: [24 floats], sunday: [24 floats] }
+    WEEKDAY_KEYS = %i[sunday monday tuesday wednesday thursday friday saturday].freeze
+
+    # consumption_profile: { monday: [24 floats], tuesday: ..., sunday: [24 floats] }
     #   Each value 0.0–1.0: relative consumption level at that hour.
     #   No solar envelope — consumption can happen at any hour (bakery at 3am, etc.).
     #   If nil, defaults to flat consumption (1.0 all day).
@@ -47,7 +49,7 @@ module Lupina
 
     def default_consumption_profile
       flat = Array.new(24, 1.0)
-      { workday: flat, saturday: flat, sunday: flat }
+      WEEKDAY_KEYS.each_with_object({}) { |day, h| h[day] = flat }
     end
 
     def days_in_month
@@ -68,13 +70,7 @@ module Lupina
     def build_intervals
       (1..days_in_month).flat_map do |day|
         date = Date.new(@year, @month, day)
-        day_type = if date.sunday?
-          :sunday
-        elsif date.saturday?
-          :saturday
-        else
-          :workday
-        end
+        day_type = WEEKDAY_KEYS[date.wday]
         96.times.map do |i|
           { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25, day_type: day_type }
         end
@@ -93,7 +89,7 @@ module Lupina
     # --- Consumption profile lookup (interpolated) ---
 
     def consumption_profile_at(hour, day_type)
-      arr = @consumption_profile[day_type] || @consumption_profile[:workday]
+      arr = @consumption_profile[day_type] || @consumption_profile[:monday]
       h = hour.floor % 24
       h_next = (h + 1) % 24
       frac = hour - hour.floor

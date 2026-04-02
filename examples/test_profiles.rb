@@ -28,17 +28,17 @@ descriptions.each_with_index do |desc, i|
   puts "  July surplus: #{result[:stats][:total_surplus_kwh]} kWh"
   puts
 
-  # Visualize profiles (surplus profiles for production)
-  wd = params["workday_profile"]
+  # Visualize profiles (Monday as workday representative)
+  mo = params["monday_profile"]
   sa = params["saturday_profile"]
   su = params["sunday_profile"]
 
-  puts "  Hour  Workday                  Saturday                 Sunday"
+  puts "  Hour  Monday                   Saturday                 Sunday"
   24.times do |h|
-    wd_bar = "#" * (wd[h] * 30).round
+    mo_bar = "#" * (mo[h] * 30).round
     sa_bar = "#" * (sa[h] * 30).round
     su_bar = "#" * (su[h] * 30).round
-    printf "  %02d:00 %4.2f %-30s  %4.2f %-30s  %4.2f %s\n", h, wd[h], wd_bar, sa[h], sa_bar, su[h], su_bar
+    printf "  %02d:00 %4.2f %-30s  %4.2f %-30s  %4.2f %s\n", h, mo[h], mo_bar, sa[h], sa_bar, su[h], su_bar
   end
 
   # Show a sample Wednesday

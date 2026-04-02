@@ -76,7 +76,7 @@ descriptions.each_with_index do |desc, i|
     end
 
     # Check profiles exist and have correct size
-    %w[workday_profile saturday_profile sunday_profile].each do |key|
+    Lupina::DescriptionParser::PROFILE_KEYS.each do |key|
       unless result[key].is_a?(Array) && result[key].size == 24
         issues << "#{key}: missing or wrong size"
       end
@@ -94,11 +94,9 @@ descriptions.each_with_index do |desc, i|
 
     # Generate CSV for production examples to verify end-to-end
     if result["type"] == "production"
-      profile = {
-        workday: result["workday_profile"],
-        saturday: result["saturday_profile"],
-        sunday: result["sunday_profile"]
-      }
+      profile = Lupina::DescriptionParser::WEEKDAYS.each_with_object({}) do |day, h|
+        h[day.to_sym] = result["#{day}_profile"]
+      end
       edc = Lupina.generate_edc(
         capacity_kwp: result["capacity_kwp"],
         yearly_surplus_kwh: result["yearly_surplus_kwh"],
