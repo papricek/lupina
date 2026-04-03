@@ -107,6 +107,41 @@ module Lupina
         DŮLEŽITÉ: V příkladech výše je zkrácený zápis (Po-Pá, FULL, ZERO).
         V JSON odpovědi MUSÍŠ vždy vypsat všech 7 profilů jako plné pole 24 čísel!
 
+        === POKROČILÉ FUNKCE (volitelné — vyplň JEN pokud popis explicitně vyžaduje) ===
+
+        "holiday_profile": [24 čísel] nebo null
+          Profil pro české státní svátky (1.1., Velikonoční po., 1.5., 8.5., 5.7., 6.7.,
+          28.9., 28.10., 17.11., 24-26.12.). Generátor svátky zná automaticky.
+          Typicky = sunday_profile (zavřeno → plné přetoky / minimální spotřeba).
+          Null = svátky se neliší od normálního dne.
+
+        "shutdown_periods": [{"from":"MM-DD","to":"MM-DD"}] nebo []
+          Celozávodní dovolená, plánované odstávky. Tyto dny použijí holiday_profile.
+          Příklad: [{"from":"07-01","to":"07-14"}]
+
+        "seasonal_overrides": [...] nebo []
+          Pro profily závislé na ročním období (školy v létě, sezónní provozy).
+          Každý override: {"months":[7,8], "monday_profile":[24], ..., "sunday_profile":[24],
+          "holiday_profile":[24] nebo null}. Základní profily platí pro měsíce BEZ override.
+
+        "monthly_consumption_weights": [12 čísel] nebo null (JEN pro consumption)
+          Sezónní váhy spotřeby (index 0=leden, 11=prosinec). Vyšší číslo = větší spotřeba.
+          Tepelné čerpadlo: [1.8,1.5,1.2,1.0,0.7,0.5,0.4,0.5,0.7,1.0,1.4,1.7]
+          Klimatizace: [0.6,0.6,0.8,1.0,1.2,1.5,1.8,1.7,1.2,0.9,0.7,0.6]
+
+        "battery_kwh": číslo nebo null (JEN pro production)
+          Kapacita bateriového úložiště v kWh. Posouvá přetoky — ráno se plní, přetoky začnou později.
+
+        "day_frequency": {"monday":0.4, ...} nebo null
+          Pravděpodobnost 0.0-1.0 že daný den je aktivní. Pro sporadické vzory ("2-3× týdně" = ~0.4).
+          Nezmíněné dny = vždy aktivní.
+
+        Příklad pokročilých funkcí — škola s prázdninami:
+          Základní profily (školní rok): Po-Pá přetoky po 15h, So+Ne FULL
+          holiday_profile: FULL (o svátcích zavřeno)
+          seasonal_overrides: [{"months":[7,8], všech 7 profilů = FULL, holiday_profile: FULL}]
+          shutdown_periods: [{"from":"12-23","to":"01-02"}]
+
         Vrať POUZE validní JSON, bez markdown, bez komentářů:
 
         {
@@ -121,6 +156,12 @@ module Lupina
           "friday_profile": [24 čísel 0.0-1.0],
           "saturday_profile": [24 čísel 0.0-1.0],
           "sunday_profile": [24 čísel 0.0-1.0],
+          "holiday_profile": [24 čísel 0.0-1.0] nebo null,
+          "shutdown_periods": [{"from":"MM-DD","to":"MM-DD"}] nebo [],
+          "seasonal_overrides": [{"months":[1-12],"monday_profile":[24],...,"sunday_profile":[24],"holiday_profile":[24] nebo null}] nebo [],
+          "monthly_consumption_weights": [12 čísel] nebo null,
+          "battery_kwh": číslo nebo null,
+          "day_frequency": {"monday":0.0-1.0,...} nebo null,
           "reasoning": "stručné zdůvodnění proč profily vypadají takto"
         }
 
@@ -140,6 +181,9 @@ module Lupina
         - Pokud popis zmiňuje stálý odběr (chlazení, servery), přidej base load i v noci a o víkendu.
         - Pokud popis specifikuje konkrétní dny (např. "jen ve středu"), nastav profil POUZE
           pro tyto dny a ostatní dny nastav na nulu (nebo naopak podle kontextu).
+        - Pokročilé funkce (holiday_profile, shutdown_periods, seasonal_overrides,
+          monthly_consumption_weights, battery_kwh, day_frequency) používej JEN když
+          je popis explicitně vyžaduje. Jinak nastav na null nebo [].
 
         Popis k analýze:
         "#{@description}"
@@ -175,6 +219,77 @@ module Lupina
           raise ExtractionError, "#{key} values must be 0.0-1.0"
         end
       end
+
+      validate_optional_profile!(parsed, "holiday_profile")
+      validate_shutdown_periods!(parsed)
+      validate_seasonal_overrides!(parsed)
+      validate_monthly_consumption_weights!(parsed)
+      validate_battery_kwh!(parsed)
+      validate_day_frequency!(parsed)
+    end
+
+    def validate_optional_profile!(parsed, key)
+      profile = parsed[key]
+      return unless profile.is_a?(Array)
+      raise ExtractionError, "#{key} must have 24 values" unless profile.size == 24
+      unless profile.all? { |v| v.is_a?(Numeric) && v >= 0 && v <= 1.0 }
+        raise ExtractionError, "#{key} values must be 0.0-1.0"
+      end
+    end
+
+    def validate_shutdown_periods!(parsed)
+      periods = parsed["shutdown_periods"]
+      return unless periods.is_a?(Array) && periods.any?
+      periods.each do |p|
+        raise ExtractionError, "shutdown_periods entries must have 'from' and 'to'" unless p["from"] && p["to"]
+        unless p["from"].match?(/\A\d{2}-\d{2}\z/) && p["to"].match?(/\A\d{2}-\d{2}\z/)
+          raise ExtractionError, "shutdown_periods dates must be MM-DD format"
+        end
+      end
+    end
+
+    def validate_seasonal_overrides!(parsed)
+      overrides = parsed["seasonal_overrides"]
+      return unless overrides.is_a?(Array) && overrides.any?
+      overrides.each do |override|
+        raise ExtractionError, "seasonal_overrides must have 'months'" unless override["months"].is_a?(Array)
+        PROFILE_KEYS.each do |key|
+          profile = override[key]
+          raise ExtractionError, "seasonal_override missing #{key}" unless profile.is_a?(Array)
+          raise ExtractionError, "seasonal_override #{key} must have 24 values" unless profile.size == 24
+        end
+        validate_optional_profile!(override, "holiday_profile")
+      end
+    end
+
+    def validate_monthly_consumption_weights!(parsed)
+      weights = parsed["monthly_consumption_weights"]
+      return unless weights.is_a?(Array)
+      raise ExtractionError, "monthly_consumption_weights must have 12 values" unless weights.size == 12
+      unless weights.all? { |v| v.is_a?(Numeric) && v > 0 }
+        raise ExtractionError, "monthly_consumption_weights must be positive numbers"
+      end
+    end
+
+    def validate_battery_kwh!(parsed)
+      val = parsed["battery_kwh"]
+      return unless val
+      unless val.is_a?(Numeric) && val > 0
+        raise ExtractionError, "battery_kwh must be a positive number"
+      end
+    end
+
+    def validate_day_frequency!(parsed)
+      freq = parsed["day_frequency"]
+      return unless freq.is_a?(Hash)
+      freq.each do |day, val|
+        unless WEEKDAYS.include?(day)
+          raise ExtractionError, "day_frequency key '#{day}' is not a valid weekday"
+        end
+        unless val.is_a?(Numeric) && val >= 0 && val <= 1.0
+          raise ExtractionError, "day_frequency values must be 0.0-1.0"
+        end
+      end
     end
 
     def normalize!(parsed)
@@ -182,6 +297,39 @@ module Lupina
       parsed["yearly_surplus_kwh"] = parsed["yearly_surplus_kwh"]&.to_f
       parsed["yearly_consumption_kwh"] = parsed["yearly_consumption_kwh"]&.to_f
       PROFILE_KEYS.each { |k| parsed[k] = parsed[k].map(&:to_f) }
+
+      if parsed["holiday_profile"].is_a?(Array)
+        parsed["holiday_profile"] = parsed["holiday_profile"].map(&:to_f)
+      end
+
+      if parsed["shutdown_periods"].is_a?(Array)
+        parsed["shutdown_periods"] = parsed["shutdown_periods"].map do |p|
+          { "from" => p["from"], "to" => p["to"] }
+        end
+      end
+
+      if parsed["seasonal_overrides"].is_a?(Array)
+        parsed["seasonal_overrides"] = parsed["seasonal_overrides"].map do |override|
+          normalized = { "months" => override["months"].map(&:to_i) }
+          PROFILE_KEYS.each { |k| normalized[k] = override[k].map(&:to_f) }
+          if override["holiday_profile"].is_a?(Array)
+            normalized["holiday_profile"] = override["holiday_profile"].map(&:to_f)
+          end
+          normalized
+        end
+      end
+
+      if parsed["monthly_consumption_weights"].is_a?(Array)
+        weights = parsed["monthly_consumption_weights"].map(&:to_f)
+        total = weights.sum
+        parsed["monthly_consumption_weights"] = weights.map { |w| w / total * 12.0 }
+      end
+
+      parsed["battery_kwh"] = parsed["battery_kwh"]&.to_f
+
+      if parsed["day_frequency"].is_a?(Hash)
+        parsed["day_frequency"] = parsed["day_frequency"].transform_values(&:to_f)
+      end
     end
   end
 end

@@ -4,21 +4,24 @@ require "date"
 
 module Lupina
   class EdcGenerator
+    include DayResolver
+
     attr_reader :stats
 
-    WEEKDAY_KEYS = %i[sunday monday tuesday wednesday thursday friday saturday].freeze
-
-    # surplus_profile: { monday: [24 floats], tuesday: ..., sunday: [24 floats] }
-    #   Each value 0.0–1.0: fraction of solar production that becomes surplus at that hour.
-    #   The generator applies a solar envelope per month to shape the output realistically.
-    #   If nil, defaults to full surplus (1.0 all day) — all production goes to grid.
     def initialize(capacity_kwp:, yearly_surplus_kwh:, month:, year: Date.today.year,
-                   surplus_profile: nil, ean: "859182400110224391", seed: nil)
+                   surplus_profile: nil, holiday_profile: nil, shutdown_periods: nil,
+                   seasonal_overrides: nil, battery_kwh: nil, day_frequency: nil,
+                   ean: "859182400110224391", seed: nil)
       @capacity_kwp = capacity_kwp.to_f
       @yearly_surplus_kwh = yearly_surplus_kwh.to_f
       @month = month
       @year = year
       @surplus_profile = surplus_profile || default_surplus_profile
+      @holiday_profile = holiday_profile
+      @shutdown_periods = shutdown_periods
+      @seasonal_overrides = seasonal_overrides
+      @battery_kwh = battery_kwh&.to_f
+      @day_frequency = day_frequency
       @ean = ean
       @rng = seed ? Random.new(seed) : Random.new
       @stats = {}
@@ -28,16 +31,14 @@ module Lupina
       intervals = build_intervals
       daily_factors = assign_daily_factors
 
-      # Compute surplus weight for each 15-min interval
       weights = intervals.map do |i|
         mid = (i[:hour_from] + i[:hour_to]) / 2.0
-        profile_val = surplus_profile_at(mid, i[:day_type])
+        profile_val = interpolate_profile(i[:profile], mid)
         solar_val = solar_envelope(mid)
         noise = 0.85 + @rng.rand * 0.30
         profile_val * solar_val * daily_factors[i[:date]] * noise
       end
 
-      # Distribute monthly surplus proportionally to weights
       total_weight = weights.sum
       surplus_kwh = if total_weight > 0
         weights.map { |w| (w / total_weight) * monthly_surplus_kwh }
@@ -45,11 +46,17 @@ module Lupina
         Array.new(intervals.size, 0.0)
       end
 
+      surplus_kwh = apply_battery_ramp(intervals, surplus_kwh) if @battery_kwh
+
       compute_stats(intervals, surplus_kwh)
       build_csv(intervals, surplus_kwh)
     end
 
     private
+
+    def base_profiles
+      @surplus_profile
+    end
 
     def default_surplus_profile
       flat = Array.new(24, 1.0)
@@ -68,9 +75,6 @@ module Lupina
       @yearly_surplus_kwh * effective_surplus_share
     end
 
-    # When surplus is a large fraction of production, the monthly surplus
-    # distribution must follow the production curve. Blend surplus shares
-    # toward production shares proportionally to the surplus/production ratio.
     def effective_surplus_share
       yearly_production = @capacity_kwp * SolarModel::SPECIFIC_YIELD
       ratio = (@yearly_surplus_kwh / yearly_production).clamp(0.0, 1.0)
@@ -79,19 +83,16 @@ module Lupina
       surp * (1 - ratio) + prod * ratio
     end
 
-    # --- Interval grid ---
-
     def build_intervals
       (1..days_in_month).flat_map do |day|
         date = Date.new(@year, @month, day)
-        day_type = WEEKDAY_KEYS[date.wday]
+        resolved = resolve_day(date)
         96.times.map do |i|
-          { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25, day_type: day_type }
+          { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25,
+            day_type: resolved[:day_type], profile: resolved[:profile] }
         end
       end
     end
-
-    # --- Daily variation (±30%) ---
 
     def assign_daily_factors
       (1..days_in_month).each_with_object({}) do |day, hash|
@@ -100,17 +101,12 @@ module Lupina
       end
     end
 
-    # --- Surplus profile lookup (interpolated) ---
-
-    def surplus_profile_at(hour, day_type)
-      arr = @surplus_profile[day_type] || @surplus_profile[:monday]
+    def interpolate_profile(arr, hour)
       h = hour.floor % 24
       h_next = (h + 1) % 24
       frac = hour - hour.floor
       arr[h] * (1 - frac) + arr[h_next] * frac
     end
-
-    # --- Solar envelope (sin curve between sunrise and sunset) ---
 
     def solar_envelope(hour)
       solar = SolarModel::SOLAR_HOURS[@month]
@@ -120,7 +116,35 @@ module Lupina
       Math.sin(phase)
     end
 
-    # --- Stats ---
+    def apply_battery_ramp(intervals, surplus_kwh)
+      result = surplus_kwh.dup
+      absorbed_total = 0.0
+
+      dates = intervals.map { |i| i[:date] }.uniq
+      dates.each do |date|
+        day_indices = intervals.each_index.select { |idx| intervals[idx][:date] == date }
+        remaining_capacity = @battery_kwh
+
+        day_indices.each do |idx|
+          break if remaining_capacity <= 0
+          energy = result[idx]
+          next if energy <= 0
+
+          absorbed = [energy, remaining_capacity].min
+          result[idx] -= absorbed
+          remaining_capacity -= absorbed
+          absorbed_total += absorbed
+        end
+      end
+
+      remaining_total = result.sum
+      if remaining_total > 0 && absorbed_total > 0
+        scale = (remaining_total + absorbed_total) / remaining_total
+        result.map! { |v| v * scale }
+      end
+
+      result
+    end
 
     def compute_stats(intervals, surplus_kwh)
       total_surplus = surplus_kwh.sum
@@ -136,8 +160,6 @@ module Lupina
         peak_surplus_kw: peak_surplus_kw.round(1)
       }
     end
-
-    # --- CSV output ---
 
     def build_csv(intervals, surplus_kwh)
       header = "Datum;Cas od;Cas do;IN-#{@ean}-D;OUT-#{@ean}-D"

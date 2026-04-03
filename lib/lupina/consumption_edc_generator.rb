@@ -4,20 +4,23 @@ require "date"
 
 module Lupina
   class ConsumptionEdcGenerator
+    include DayResolver
+
     attr_reader :stats
 
-    WEEKDAY_KEYS = %i[sunday monday tuesday wednesday thursday friday saturday].freeze
-
-    # consumption_profile: { monday: [24 floats], tuesday: ..., sunday: [24 floats] }
-    #   Each value 0.0–1.0: relative consumption level at that hour.
-    #   No solar envelope — consumption can happen at any hour (bakery at 3am, etc.).
-    #   If nil, defaults to flat consumption (1.0 all day).
     def initialize(yearly_consumption_kwh:, month:, year: Date.today.year,
-                   consumption_profile: nil, ean: "859182400110224391", seed: nil)
+                   consumption_profile: nil, holiday_profile: nil, shutdown_periods: nil,
+                   seasonal_overrides: nil, monthly_consumption_weights: nil,
+                   day_frequency: nil, ean: "859182400110224391", seed: nil)
       @yearly_consumption_kwh = yearly_consumption_kwh.to_f
       @month = month
       @year = year
       @consumption_profile = consumption_profile || default_consumption_profile
+      @holiday_profile = holiday_profile
+      @shutdown_periods = shutdown_periods
+      @seasonal_overrides = seasonal_overrides
+      @monthly_consumption_weights = monthly_consumption_weights
+      @day_frequency = day_frequency
       @ean = ean
       @rng = seed ? Random.new(seed) : Random.new
       @stats = {}
@@ -29,7 +32,7 @@ module Lupina
 
       weights = intervals.map do |i|
         mid = (i[:hour_from] + i[:hour_to]) / 2.0
-        profile_val = consumption_profile_at(mid, i[:day_type])
+        profile_val = interpolate_profile(i[:profile], mid)
         noise = 0.85 + @rng.rand * 0.30
         profile_val * daily_factors[i[:date]] * noise
       end
@@ -47,6 +50,10 @@ module Lupina
 
     private
 
+    def base_profiles
+      @consumption_profile
+    end
+
     def default_consumption_profile
       flat = Array.new(24, 1.0)
       WEEKDAY_KEYS.each_with_object({}) { |day, h| h[day] = flat }
@@ -60,24 +67,24 @@ module Lupina
       Date.new(@year, 12, 31).yday
     end
 
-    # Consumption is distributed proportionally to days in month (no seasonal solar effect)
     def monthly_consumption_kwh
-      @yearly_consumption_kwh * days_in_month / days_in_year.to_f
+      if @monthly_consumption_weights
+        @yearly_consumption_kwh * @monthly_consumption_weights[@month - 1]
+      else
+        @yearly_consumption_kwh * days_in_month / days_in_year.to_f
+      end
     end
-
-    # --- Interval grid ---
 
     def build_intervals
       (1..days_in_month).flat_map do |day|
         date = Date.new(@year, @month, day)
-        day_type = WEEKDAY_KEYS[date.wday]
+        resolved = resolve_day(date)
         96.times.map do |i|
-          { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25, day_type: day_type }
+          { date: date, hour_from: i * 0.25, hour_to: (i + 1) * 0.25,
+            day_type: resolved[:day_type], profile: resolved[:profile] }
         end
       end
     end
-
-    # --- Daily variation (±30%) ---
 
     def assign_daily_factors
       (1..days_in_month).each_with_object({}) do |day, hash|
@@ -86,17 +93,12 @@ module Lupina
       end
     end
 
-    # --- Consumption profile lookup (interpolated) ---
-
-    def consumption_profile_at(hour, day_type)
-      arr = @consumption_profile[day_type] || @consumption_profile[:monday]
+    def interpolate_profile(arr, hour)
       h = hour.floor % 24
       h_next = (h + 1) % 24
       frac = hour - hour.floor
       arr[h] * (1 - frac) + arr[h_next] * frac
     end
-
-    # --- Stats ---
 
     def compute_stats(intervals, consumption_kwh)
       total = consumption_kwh.sum
@@ -110,8 +112,6 @@ module Lupina
         peak_consumption_kw: peak_kw.round(1)
       }
     end
-
-    # --- CSV output ---
 
     def build_csv(intervals, consumption_kwh)
       header = "Datum;Cas od;Cas do;IN-#{@ean}-D;OUT-#{@ean}-D"
