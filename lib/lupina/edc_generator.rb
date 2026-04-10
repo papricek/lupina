@@ -106,7 +106,8 @@ module Lupina
       return 0.0 if hour <= solar[:rise] || hour >= solar[:set]
 
       phase = (hour - solar[:rise]) / (solar[:set] - solar[:rise]) * Math::PI
-      Math.sin(phase) ** 3.0
+      exponent = phase < Math::PI / 2 ? 3.5 : 2.5
+      Math.sin(phase) ** exponent
     end
 
     def apply_battery_ramp(intervals, surplus_kwh)

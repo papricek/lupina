@@ -1,6 +1,6 @@
 # Autoresearch journal
 
-RUNNING BEST: 0.2469 at 2026-04-10T22:40 (iter 13: daily 0.1..1.9 × sin^3.0)
+RUNNING BEST: 0.2464 at 2026-04-10T23:10 (iter 18: asymmetric envelope 3.5/2.5 morning/afternoon)
 
 ## iter 000 — 2026-04-10T22:00 — BASELINE
 
@@ -160,6 +160,114 @@ Biggest wins: variance_ratio_error (-22%), hourly_shape_mae (-12%), daily_total_
 2. Asymmetric solar envelope (morning sharper than afternoon).
 3. Filter out low-signal entries from peak_time_delta.
 4. Try log-normal distribution for daily factors instead of uniform.
+
+# Session 2 — hourly_shape_mae focus
+
+Running best after session 1: 0.2469. Remaining dominant component: `hourly_shape_mae` at 0.6079 (weighted 0.091).
+
+## iter 015-017 — per-month envelope exponent
+
+Hypothesis: optimal solar exponent may differ by month (winter short days vs summer inverter clipping).
+
+| iter | winter / summer | composite | shape_mae | verdict  |
+|------|-----------------|-----------|-----------|----------|
+| 015  | 2.5 / 3.5       | 0.2470    | 0.6086    | REJECTED |
+| 016  | 3.5 / 2.5       | 0.2474    | 0.6114    | REJECTED |
+
+Neither direction helps. The envelope exponent is not month-dependent in a simple way.
+
+## iter 018 — ACCEPTED (asymmetric envelope)
+
+Hypothesis: real solar shape may be asymmetric — different behavior before vs after solar noon.
+
+Diff: split exponent at phase=π/2.
+
+```
+-      Math.sin(phase) ** 3.0
++      exponent = phase < Math::PI / 2 ? 3.5 : 2.5
++      Math.sin(phase) ** exponent
+```
+
+Score: 0.2469 → **0.2464** (-0.0005). shape_mae: 0.6079 → 0.6047.
+
+Morning (phase < π/2) gets sharper exponent (less value far from peak); afternoon gets flatter exponent (more value far from peak). Empirically: real data shows morning ramp is *slower* than symmetric sin would suggest (atmospheric depth + panel warmup), while afternoon decay *extends* further (warm panels + continuing until sunset).
+
+Small absolute improvement but confirms an asymmetry signal exists.
+
+## iter 019-022 — tune the asymmetry further
+
+| iter | morning/afternoon | composite | verdict  |
+|------|-------------------|-----------|----------|
+| 019  | 4.0 / 2.0         | 0.2470    | REJECTED |
+| 020  | 3.5/2.5 + peak shift +0.3h | 0.2466 | REJECTED (tied) |
+| 021  | 4.0 / 3.0         | 0.2465    | REJECTED (tied) |
+| 022  | 4.5 / 2.5         | 0.2465    | REJECTED (tied) |
+
+3.5/2.5 is the local optimum. Pushing further in any direction is a wash or regression.
+
+## iter 023 — REJECTED (AR(1) daily factors)
+
+Hypothesis: real weather has day-to-day persistence (cloudy stretches, clear weeks). Replace iid uniform daily factors with AR(1): `f[n] = 0.5·f[n-1] + 0.5·uniform(0.1, 1.9)`.
+
+Score: 0.2464 → **0.2557** (+0.0093). daily_total_mape regressed from 0.4677 to 0.5045.
+
+Why: AR(1) compresses variance (the smoothing reduces extreme values). Score rewards wider variance (matches real cloudy-clear distribution), so smoothing backfires. Reverted.
+
+## iter 024 — REJECTED (Normal daily factors)
+
+Hypothesis: real daily-total distribution may be bell-shaped. Replace uniform with Normal(μ=1, σ=0.5) clamped to [0.1, 1.9].
+
+Score: 0.2464 → 0.2491 (+0.0027). daily_total_mape 0.4677 → 0.4747.
+
+Why: real distribution has heavier tails than Normal — the flat uniform is closer to truth than bell-shaped. Reverted.
+
+## Diagnostic: where is shape_mae coming from?
+
+Dumped real vs synth normalized workday shapes for 3 entries:
+
+| entry | description                                    | real peak   | synth peak  | L1    | cause                                    |
+|-------|------------------------------------------------|-------------|-------------|-------|------------------------------------------|
+| P014  | "čistě výrobní, nikdo nespotřebovává"         | h13 (16.5%) | h13 (16.7%) | 0.092 | near-ideal                               |
+| P029  | "jede od 9 do 16"                             | bimodal: h12 (19%), h14 (18%) | smooth h12 (17%) | 0.389 | LLM profile too coarse (uniform 0.4 during 9-15) — real has lunch-break dip |
+| P034  | "přes týden vše sežereme"                     | h12-13 solar peak | all zero    | 1.000 | LLM profile all-zero, real has significant workday export — annotation bug |
+
+Plus distribution across all 49 entries:
+- shape_mae < 0.1: **1 entry** (P014) — generator near-perfect
+- 0.1-0.3: 6 entries — good
+- 0.3-0.5: 8 entries — moderate
+- 0.5-0.8: 26 entries — dominant
+- 0.8-1.1: 6 entries
+- 1.1+: 2 entries (P016 shape=1.82, P020 shape=1.98) — catastrophic, annotation bugs
+
+P016 ("březen skoro nic nedá") has 116 kWh total for 34 kWp, flat at ~0.04 kWh/hour — broken meter or near-zero signal. P020 real has proper workday solar curve, but description says "přes týden vše sežereme" — annotator got it wrong.
+
+**Conclusion:** shape_mae has a soft ceiling bounded by annotation quality. ~15% of entries have descriptions that contradict their data. The generator can only match what the (description → LLM profile) pipeline produces. Further shape_mae improvements require either fixing annotations or changing the description_parser (off-limits per program.md).
+
+## Session 2 summary
+
+10 iterations. **Composite 0.2469 → 0.2464. Δ = -0.0005 (-0.2%).**
+
+One accepted change (asymmetric envelope 3.5/2.5), all others rejected. Diminishing returns confirmed.
+
+**Cumulative (sessions 1 + 2):** 24 iterations, composite 0.2793 → 0.2464, **-11.8%**.
+
+Final generator state:
+
+```ruby
+# Daily factor distribution
+hash[date] = 0.1 + @rng.rand * 1.8
+
+# Asymmetric solar envelope
+phase = (hour - solar[:rise]) / (solar[:set] - solar[:rise]) * Math::PI
+exponent = phase < Math::PI / 2 ? 3.5 : 2.5
+Math.sin(phase) ** exponent
+```
+
+**What autoresearch cannot fix (without rewriting the rules):**
+- Annotation errors in eval data (~15% of entries have description/data mismatch)
+- LLM profile granularity (hour-level, can't capture lunch-break dips at 15-min resolution)
+- Low-signal entries (P016, P024) where the metric measures noise
+
 
 
 
