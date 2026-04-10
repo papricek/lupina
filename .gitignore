@@ -12,3 +12,5 @@
 # Eval dataset contains anonymized real customer data —
 # reproducible locally via eval/bin/extract-from-wattlink, never committed.
 /eval/dataset/
+/eval/parse_cache/
+/eval/score.json

@@ -97,7 +97,7 @@ module Lupina
     def assign_daily_factors
       (1..days_in_month).each_with_object({}) do |day, hash|
         date = Date.new(@year, @month, day)
-        hash[date] = 0.7 + @rng.rand * 0.6
+        hash[date] = 0.1 + @rng.rand * 1.8
       end
     end
 
@@ -106,7 +106,7 @@ module Lupina
       return 0.0 if hour <= solar[:rise] || hour >= solar[:set]
 
       phase = (hour - solar[:rise]) / (solar[:set] - solar[:rise]) * Math::PI
-      Math.sin(phase)
+      Math.sin(phase) ** 3.0
     end
 
     def apply_battery_ramp(intervals, surplus_kwh)

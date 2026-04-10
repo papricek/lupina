@@ -1,0 +1,287 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "digest"
+require "fileutils"
+require "date"
+
+DATASET_ROOT = File.expand_path("../dataset", __dir__)
+CACHE_ROOT   = File.expand_path("../parse_cache", __dir__)
+REPORT_PATH  = File.expand_path("../score.json", __dir__)
+
+WEIGHTS = {
+  daily_total_mape:    0.25,
+  hourly_shape_mae:    0.30,
+  peak_time_delta:     0.10,
+  weekday_ratio_error: 0.15,
+  autocorr_distance:   0.10,
+  variance_ratio_error: 0.10
+}
+
+NORMALIZERS = {
+  daily_total_mape:    1.5,
+  hourly_shape_mae:    2.0,
+  peak_time_delta:     12.0,
+  weekday_ratio_error: 2.0,
+  autocorr_distance:   2.0,
+  variance_ratio_error: 5.0
+}
+
+def parse_cached(description)
+  FileUtils.mkdir_p(CACHE_ROOT)
+  hash = Digest::MD5.hexdigest(description)
+  path = File.join(CACHE_ROOT, "#{hash}.json")
+  return JSON.parse(File.read(path)) if File.exist?(path)
+  parsed = Lupina.parse_description(description)
+  File.write(path, JSON.pretty_generate(parsed))
+  parsed
+end
+
+def build_profile(parsed)
+  Lupina::DescriptionParser::WEEKDAYS.each_with_object({}) do |d, h|
+    h[d.to_sym] = parsed["#{d}_profile"]
+  end
+end
+
+def generate_synth(metadata, description)
+  parsed = parse_cached(description)
+  profile = build_profile(parsed)
+  advanced = Lupina.extract_advanced_options(parsed)
+
+  if metadata["kind"] == "production"
+    Lupina.generate_edc(
+      capacity_kwp: metadata["capacity_kwp"].to_f,
+      yearly_surplus_kwh: metadata["yearly_surplus_kwh_estimated"].to_f,
+      month: metadata["month"],
+      year: metadata["year"],
+      surplus_profile: profile,
+      seed: 42,
+      **advanced
+    )
+  else
+    Lupina.generate_consumption_edc(
+      yearly_consumption_kwh: metadata["yearly_consumption_kwh_estimated"].to_f,
+      month: metadata["month"],
+      year: metadata["year"],
+      consumption_profile: profile,
+      seed: 42,
+      **advanced
+    )
+  end
+end
+
+def parse_csv(csv_text, kind)
+  lines = csv_text.lines.map(&:strip).reject(&:empty?)
+  lines.shift
+
+  series = []
+  daily_totals = Hash.new(0.0)
+  per_hour_wd = Array.new(24, 0.0); per_hour_wd_n = Array.new(24, 0)
+  per_hour_we = Array.new(24, 0.0); per_hour_we_n = Array.new(24, 0)
+  per_weekday_sum = Hash.new(0.0)
+
+  lines.each do |line|
+    cols = line.split(";")
+    next if cols.size < 5
+    date = Date.strptime(cols[0], "%d.%m.%Y")
+    hour = cols[1].split(":")[0].to_i
+    in_val = cols[3].to_s.tr(",", ".").to_f
+    out_val = cols[4].to_s.tr(",", ".").to_f
+    val = kind == "production" ? out_val : in_val
+
+    series << val
+    daily_totals[date] += val
+    wday = date.wday
+    per_weekday_sum[wday] += val
+    if wday == 0 || wday == 6
+      per_hour_we[hour] += val; per_hour_we_n[hour] += 1
+    else
+      per_hour_wd[hour] += val; per_hour_wd_n[hour] += 1
+    end
+  end
+
+  workday_avg = per_hour_wd.each_with_index.map { |s, i| per_hour_wd_n[i] > 0 ? s / per_hour_wd_n[i] : 0.0 }
+  weekend_avg = per_hour_we.each_with_index.map { |s, i| per_hour_we_n[i] > 0 ? s / per_hour_we_n[i] : 0.0 }
+
+  {
+    series: series,
+    daily_totals: daily_totals.sort.map { |_, v| v },
+    workday_hourly: workday_avg,
+    weekend_hourly: weekend_avg,
+    per_weekday: per_weekday_sum,
+    total: daily_totals.values.sum
+  }
+end
+
+def normalize_shape(arr)
+  sum = arr.sum
+  return arr.map { 0.0 } if sum <= 0
+  arr.map { |v| v / sum }
+end
+
+def daily_total_mape(synth, real)
+  s = synth[:daily_totals].sort.reverse
+  r = real[:daily_totals].sort.reverse
+  mean_r = r.sum / [ r.size, 1 ].max.to_f
+  return 0.0 if mean_r <= 0 || s.empty? || r.empty?
+  pairs = s.zip(r).reject { |a, b| a.nil? || b.nil? }
+  return 0.0 if pairs.empty?
+  pairs.sum { |a, b| (a - b).abs / mean_r } / pairs.size.to_f
+end
+
+def hourly_shape_mae(synth, real)
+  s_wd = normalize_shape(synth[:workday_hourly])
+  r_wd = normalize_shape(real[:workday_hourly])
+  s_we = normalize_shape(synth[:weekend_hourly])
+  r_we = normalize_shape(real[:weekend_hourly])
+  wd = s_wd.zip(r_wd).sum { |s, r| (s - r).abs }
+  we = s_we.zip(r_we).sum { |s, r| (s - r).abs }
+  (wd + we) / 2.0
+end
+
+def peak_time_delta(synth, real)
+  s_wd = synth[:workday_hourly].each_with_index.max_by { |v, _| v }[1]
+  r_wd = real[:workday_hourly].each_with_index.max_by { |v, _| v }[1]
+  s_we = synth[:weekend_hourly].each_with_index.max_by { |v, _| v }[1]
+  r_we = real[:weekend_hourly].each_with_index.max_by { |v, _| v }[1]
+  ((s_wd - r_wd).abs + (s_we - r_we).abs) / 2.0
+end
+
+def weekday_ratio_error(synth, real)
+  s_wd = (1..5).sum { |d| synth[:per_weekday][d] }
+  s_we = [ 0, 6 ].sum { |d| synth[:per_weekday][d] }
+  r_wd = (1..5).sum { |d| real[:per_weekday][d] }
+  r_we = [ 0, 6 ].sum { |d| real[:per_weekday][d] }
+  return 0.0 if s_wd <= 0 || r_wd <= 0
+  (s_we / s_wd - r_we / r_wd).abs
+end
+
+def variance(arr)
+  return 0.0 if arr.size < 2
+  mean = arr.sum / arr.size.to_f
+  arr.sum { |v| (v - mean) ** 2 } / (arr.size - 1).to_f
+end
+
+def autocorr(series, lag: 1)
+  return 0.0 if series.size <= lag
+  mean = series.sum / series.size.to_f
+  den = series.sum { |v| (v - mean) ** 2 }
+  return 0.0 if den.zero?
+  num = 0.0
+  (0...(series.size - lag)).each do |i|
+    num += (series[i] - mean) * (series[i + lag] - mean)
+  end
+  num / den
+end
+
+def autocorr_distance(synth, real)
+  (autocorr(synth[:series]) - autocorr(real[:series])).abs
+end
+
+def variance_ratio_error(synth, real)
+  sv = variance(synth[:daily_totals])
+  rv = variance(real[:daily_totals])
+  return 0.0 if sv <= 0 || rv <= 0
+  Math.log(sv / rv).abs
+end
+
+def compute_components(synth, real)
+  {
+    daily_total_mape:    daily_total_mape(synth, real),
+    hourly_shape_mae:    hourly_shape_mae(synth, real),
+    peak_time_delta:     peak_time_delta(synth, real),
+    weekday_ratio_error: weekday_ratio_error(synth, real),
+    autocorr_distance:   autocorr_distance(synth, real),
+    variance_ratio_error: variance_ratio_error(synth, real)
+  }
+end
+
+def composite_score(components)
+  components.sum do |key, val|
+    norm = [ val / NORMALIZERS[key], 1.0 ].min
+    norm * WEIGHTS[key]
+  end
+end
+
+folders = Dir.glob(File.join(DATASET_ROOT, "[CP]*")).select { |f| File.directory?(f) }.sort
+puts "Scoring #{folders.size} entries..."
+puts
+
+results = []
+folders.each do |folder|
+  id = File.basename(folder).split("_").first
+  metadata_path = File.join(folder, "metadata.json")
+  desc_path = File.join(folder, "description.txt")
+  real_path = File.join(folder, "real.csv")
+  next unless File.exist?(metadata_path) && File.exist?(desc_path) && File.exist?(real_path)
+
+  metadata = JSON.parse(File.read(metadata_path))
+  description = File.read(desc_path).strip
+
+  begin
+    gen = generate_synth(metadata, description)
+    synth = parse_csv(gen[:csv], metadata["kind"])
+    real = parse_csv(File.read(real_path), metadata["kind"])
+    components = compute_components(synth, real)
+    composite = composite_score(components)
+    results << { id: id, kind: metadata["kind"], composite: composite, components: components }
+    printf "  %-5s [%s] composite=%.4f  dmape=%.2f  shape=%.2f  peak=%.1f  ratio=%.2f  acf=%.2f  var=%.2f\n",
+           id, metadata["kind"][0], composite,
+           components[:daily_total_mape], components[:hourly_shape_mae],
+           components[:peak_time_delta], components[:weekday_ratio_error],
+           components[:autocorr_distance], components[:variance_ratio_error]
+  rescue => e
+    puts "  #{id} FAILED: #{e.class}: #{e.message}"
+    results << { id: id, kind: metadata["kind"], composite: nil, error: e.message }
+  end
+end
+
+valid = results.select { |r| r[:composite] }
+failed = results.reject { |r| r[:composite] }
+
+puts
+puts "=== SUMMARY ==="
+puts "Scored: #{valid.size}/#{results.size}  (failed: #{failed.size})"
+
+if valid.any?
+  overall = valid.sum { |r| r[:composite] } / valid.size.to_f
+  prod = valid.select { |r| r[:kind] == "production" }
+  cons = valid.select { |r| r[:kind] == "consumption" }
+
+  puts "Overall composite (lower better): #{overall.round(4)}"
+  puts "  production (#{prod.size}): #{(prod.sum { |r| r[:composite] } / [ prod.size, 1 ].max).round(4)}"
+  puts "  consumption (#{cons.size}): #{(cons.sum { |r| r[:composite] } / [ cons.size, 1 ].max).round(4)}"
+  puts
+  puts "Component averages:"
+  WEIGHTS.each_key do |k|
+    avg = valid.sum { |r| r[:components][k] } / valid.size.to_f
+    weighted = [ avg / NORMALIZERS[k], 1.0 ].min * WEIGHTS[k]
+    printf "  %-22s raw=%.4f  weighted=%.4f\n", k, avg, weighted
+  end
+  puts
+  puts "Top 5 worst entries:"
+  valid.sort_by { |r| -r[:composite] }.first(5).each do |r|
+    puts "  #{r[:id]} composite=#{r[:composite].round(4)}  worst: #{r[:components].max_by { |_, v| v }[0]}"
+  end
+  puts
+  puts "Top 5 best entries:"
+  valid.sort_by { |r| r[:composite] }.first(5).each do |r|
+    puts "  #{r[:id]} composite=#{r[:composite].round(4)}"
+  end
+end
+
+if failed.any?
+  puts
+  puts "Failed entries:"
+  failed.each { |r| puts "  #{r[:id]}: #{r[:error]}" }
+end
+
+File.write(REPORT_PATH, JSON.pretty_generate({
+  overall: valid.any? ? (valid.sum { |r| r[:composite] } / valid.size.to_f) : nil,
+  count: valid.size,
+  failed: failed.size,
+  entries: results
+}))
+puts
+puts "Full report: #{REPORT_PATH}"
