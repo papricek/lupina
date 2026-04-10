@@ -32,7 +32,7 @@ module Lupina
 
       weights = intervals.map do |i|
         mid = (i[:hour_from] + i[:hour_to]) / 2.0
-        profile_val = interpolate_profile(i[:profile], mid)
+        profile_val = i[:profile][mid.floor % 24]
         noise = 0.85 + @rng.rand * 0.30
         profile_val * daily_factors[i[:date]] * noise
       end
@@ -91,13 +91,6 @@ module Lupina
         date = Date.new(@year, @month, day)
         hash[date] = 0.7 + @rng.rand * 0.6
       end
-    end
-
-    def interpolate_profile(arr, hour)
-      h = hour.floor % 24
-      h_next = (h + 1) % 24
-      frac = hour - hour.floor
-      arr[h] * (1 - frac) + arr[h_next] * frac
     end
 
     def compute_stats(intervals, consumption_kwh)
