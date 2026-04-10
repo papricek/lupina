@@ -1,0 +1,145 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "minitest/autorun"
+require "json"
+
+DATASET_ROOT = File.expand_path("../dataset", __dir__)
+
+class EvalSetTest < Minitest::Test
+  MANIFEST_PATH = File.join(DATASET_ROOT, "MANIFEST.json")
+
+  def self.folders
+    @folders ||= Dir.glob(File.join(DATASET_ROOT, "[CP]*")).select { |f| File.directory?(f) }.sort
+  end
+
+  def test_aaa_dataset_root_exists
+    assert Dir.exist?(DATASET_ROOT), "dataset root missing at #{DATASET_ROOT}"
+    refute self.class.folders.empty?, "no entry folders found in #{DATASET_ROOT}"
+  end
+
+  def test_aab_manifest_matches_folder_count
+    assert File.exist?(MANIFEST_PATH), "MANIFEST.json missing at #{MANIFEST_PATH}"
+    manifest = JSON.parse(File.read(MANIFEST_PATH))
+    assert_equal self.class.folders.size, manifest.size,
+      "MANIFEST.json has #{manifest.size} entries, folder count is #{self.class.folders.size}"
+    ids_in_manifest = manifest.map { |e| e["id"] }.sort
+    ids_in_folders = self.class.folders.map { |f| File.basename(f).split("_").first }.sort
+    assert_equal ids_in_folders, ids_in_manifest, "MANIFEST ids do not match folder ids"
+  end
+
+  folders.each do |folder|
+    id = File.basename(folder).split("_").first
+
+    define_method("test_#{id}_01_required_files_present") do
+      %w[real.csv metadata.json aggregates.json description.txt reasoning.txt].each do |f|
+        path = File.join(folder, f)
+        assert File.exist?(path), "#{id}: missing #{f}"
+        refute File.zero?(path), "#{id}: #{f} is empty"
+      end
+    end
+
+    define_method("test_#{id}_02_metadata_schema") do
+      m = JSON.parse(File.read(File.join(folder, "metadata.json")))
+      %w[id kind month year days_in_month rows synthetic_ean ean_hash].each do |k|
+        assert m.key?(k), "#{id}: metadata missing key #{k}"
+      end
+      assert_equal id, m["id"], "#{id}: metadata id mismatch (#{m["id"]})"
+      assert %w[production consumption].include?(m["kind"]), "#{id}: invalid kind #{m["kind"].inspect}"
+      assert m["month"].is_a?(Integer) && m["month"].between?(1, 12), "#{id}: invalid month"
+      assert m["year"].is_a?(Integer) && m["year"] >= 2020, "#{id}: invalid year"
+      assert m["rows"].is_a?(Integer) && m["rows"] >= 2800, "#{id}: rows too low (#{m["rows"]})"
+
+      if m["kind"] == "production"
+        %w[capacity_kwp capacity_source yearly_surplus_kwh_estimated].each do |k|
+          assert m.key?(k), "#{id}: production metadata missing #{k}"
+        end
+        assert m["capacity_kwp"].is_a?(Numeric) && m["capacity_kwp"] > 0, "#{id}: invalid capacity_kwp"
+        assert m["yearly_surplus_kwh_estimated"].is_a?(Numeric) && m["yearly_surplus_kwh_estimated"] > 0,
+          "#{id}: invalid yearly_surplus_kwh_estimated"
+      else
+        assert m.key?("yearly_consumption_kwh_estimated"),
+          "#{id}: consumption metadata missing yearly_consumption_kwh_estimated"
+        assert m["yearly_consumption_kwh_estimated"].is_a?(Numeric) && m["yearly_consumption_kwh_estimated"] > 0,
+          "#{id}: invalid yearly_consumption_kwh_estimated"
+      end
+    end
+
+    define_method("test_#{id}_03_aggregates_schema") do
+      a = JSON.parse(File.read(File.join(folder, "aggregates.json")))
+      scalars = %w[total_kwh_out total_kwh_in peak_15min_kwh peak_kw]
+      arrays24 = %w[workday_hourly_avg_out weekend_hourly_avg_out workday_hourly_avg_in weekend_hourly_avg_in]
+      hashes = %w[per_weekday_daily_total_out per_weekday_daily_total_in]
+      lists = %w[zero_hours_workday zero_hours_weekend]
+
+      (scalars + arrays24 + hashes + lists).each { |k| assert a.key?(k), "#{id}: aggregates missing #{k}" }
+
+      scalars.each do |k|
+        assert a[k].is_a?(Numeric), "#{id}: #{k} must be numeric"
+        assert a[k] >= 0, "#{id}: #{k} must be >= 0 (got #{a[k]})"
+      end
+
+      arrays24.each do |k|
+        assert a[k].is_a?(Array), "#{id}: #{k} must be an array"
+        assert_equal 24, a[k].size, "#{id}: #{k} must have 24 values"
+        assert a[k].all? { |v| v.is_a?(Numeric) && v >= 0 }, "#{id}: #{k} must contain non-negative numbers"
+      end
+
+      hashes.each do |k|
+        assert a[k].is_a?(Hash), "#{id}: #{k} must be a hash"
+        assert a[k].keys.all? { |v| v.to_s.match?(/\A[0-6]\z/) }, "#{id}: #{k} keys must be 0-6 (weekdays)"
+      end
+
+      lists.each do |k|
+        assert a[k].is_a?(Array), "#{id}: #{k} must be an array"
+        assert a[k].all? { |v| v.is_a?(Integer) && v.between?(0, 23) }, "#{id}: #{k} must contain hour ints 0-23"
+      end
+    end
+
+    define_method("test_#{id}_04_csv_format") do
+      path = File.join(folder, "real.csv")
+      lines = File.readlines(path).map(&:strip).reject(&:empty?)
+      header = lines.shift
+      assert_match(/\ADatum;Cas od;Cas do;IN-.+-D;OUT-.+-D\z/, header, "#{id}: CSV header format invalid")
+      assert lines.size >= 2800, "#{id}: CSV has only #{lines.size} data rows, expected >=2800"
+      sample = lines.first
+      assert_match(/\A\d{2}\.\d{2}\.\d{4};\d{2}:\d{2};\d{2}:\d{2};[\d,]+;[\d,]+;?\z/, sample,
+        "#{id}: CSV row format invalid: #{sample.inspect}")
+
+      m = JSON.parse(File.read(File.join(folder, "metadata.json")))
+      assert_equal m["rows"], lines.size, "#{id}: metadata.rows (#{m["rows"]}) != CSV row count (#{lines.size})"
+    end
+
+    define_method("test_#{id}_05_description_well_formed") do
+      desc = File.read(File.join(folder, "description.txt")).strip
+      refute desc.empty?, "#{id}: description is empty"
+      assert_equal 1, desc.lines.size, "#{id}: description must be one line, got #{desc.lines.size}"
+      assert desc.size.between?(5, 250), "#{id}: description length #{desc.size} out of 5..250 range"
+
+      m = JSON.parse(File.read(File.join(folder, "metadata.json")))
+      if m["kind"] == "production"
+        assert desc.match?(/kWp|kwp|přetoky/i),
+          "#{id}: production description must mention kWp or přetoky, got: #{desc.inspect}"
+      else
+        assert desc.match?(/spotřeba/i),
+          "#{id}: consumption description must mention spotřeba, got: #{desc.inspect}"
+      end
+    end
+
+    define_method("test_#{id}_06_reasoning_well_formed") do
+      reasoning = File.read(File.join(folder, "reasoning.txt")).strip
+      refute reasoning.empty?, "#{id}: reasoning is empty"
+      assert reasoning.include?("-") || reasoning.include?("*"),
+        "#{id}: reasoning must contain bullet points"
+      assert reasoning.include?("→") || reasoning.include?("->"),
+        "#{id}: reasoning must point to the final description with → or ->"
+    end
+
+    define_method("test_#{id}_07_capacity_sane_for_production") do
+      m = JSON.parse(File.read(File.join(folder, "metadata.json")))
+      next unless m["kind"] == "production"
+      ratio = m["yearly_surplus_kwh_estimated"].to_f / (m["capacity_kwp"].to_f * 1000)
+      assert ratio <= 1.10, "#{id}: export ratio #{ratio.round(2)} exceeds 1.10 (yearly > capacity × 1100) — data quality issue"
+    end
+  end
+end

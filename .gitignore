@@ -8,3 +8,7 @@
 /data/
 .env
 .DS_Store
+
+# Eval dataset contains anonymized real customer data —
+# reproducible locally via eval/bin/extract-from-wattlink, never committed.
+/eval/dataset/

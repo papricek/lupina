@@ -1,0 +1,281 @@
+require "json"
+require "digest"
+require "fileutils"
+
+DATASET_ROOT = "/Users/patrikjira/Work/claude/lupina/eval/dataset"
+TARGET_PRODUCTION = 35
+TARGET_CONSUMPTION = 15
+
+FileUtils.mkdir_p(DATASET_ROOT)
+
+def pick_best_month(ean, kind:)
+  rows = ActiveRecord::Base.connection.exec_query(
+    ActiveRecord::Base.sanitize_sql_array([
+      %q{
+        SELECT DATE_TRUNC('month', shared_at) AS m,
+               COUNT(*) AS n,
+               SUM(original) AS s_orig,
+               SUM(final) AS s_fin
+        FROM edc_readings
+        WHERE ean = ?
+        GROUP BY m
+        HAVING COUNT(*) >= 2800
+        ORDER BY m
+      }, ean
+    ])
+  ).to_a
+  return nil if rows.empty?
+
+  if kind == "production"
+    rows.max_by { |r| r["s_fin"].to_f.abs }
+  else
+    rows.max_by { |r| r["s_orig"].to_f.abs }
+  end
+end
+
+def candidate_suppliers
+  sql = %q{
+    SELECT r.ean, MAX(r.final) AS peak_15m, SUM(r.final) AS total_out, COUNT(*) AS n
+    FROM edc_readings r
+    WHERE r.ean IN (SELECT ean FROM addresses WHERE role = 'supplier' AND edc = true AND ean IS NOT NULL)
+    GROUP BY r.ean
+    HAVING COUNT(*) >= 2800 AND SUM(r.final) > 1000 AND MAX(r.final) > 0.5
+    ORDER BY MAX(r.final) DESC
+  }
+  ActiveRecord::Base.connection.exec_query(sql).to_a
+end
+
+def candidate_customers
+  sql = %q{
+    SELECT r.ean, SUM(ABS(r.original)) AS total_cons, COUNT(*) AS n
+    FROM edc_readings r
+    WHERE r.ean IN (SELECT ean FROM addresses WHERE role = 'customer' AND edc = true AND ean IS NOT NULL)
+    GROUP BY r.ean
+    HAVING COUNT(*) >= 2800 AND SUM(ABS(r.original)) > 500
+    ORDER BY SUM(ABS(r.original)) DESC
+  }
+  ActiveRecord::Base.connection.exec_query(sql).to_a
+end
+
+def diversify(candidates, n, key)
+  return candidates.first(n) if candidates.size <= n
+  sorted = candidates.sort_by { |c| c[key].to_f }
+  indices = (0...n).map { |i| (i * (sorted.size - 1).to_f / (n - 1)).round }
+  indices.uniq.map { |i| sorted[i] }
+end
+
+def aggregates_for(readings)
+  per_hour_wd = Array.new(24, 0.0); per_hour_wd_n = Array.new(24, 0)
+  per_hour_we = Array.new(24, 0.0); per_hour_we_n = Array.new(24, 0)
+  per_hour_wd_in = Array.new(24, 0.0); per_hour_wd_in_n = Array.new(24, 0)
+  per_hour_we_in = Array.new(24, 0.0); per_hour_we_in_n = Array.new(24, 0)
+  per_weekday_out = Hash.new(0.0); per_weekday_in = Hash.new(0.0); per_weekday_n = Hash.new(0)
+
+  total_out = 0.0; total_in = 0.0; peak_out = 0.0
+
+  readings.each do |r|
+    hour = r["shared_at"].hour
+    out_val = r["final"].to_f.abs
+    in_val = r["original"].to_f.abs
+    total_out += out_val
+    total_in += in_val
+    peak_out = out_val if out_val > peak_out
+    wday = r["shared_at"].wday
+    per_weekday_out[wday] += out_val
+    per_weekday_in[wday] += in_val
+    per_weekday_n[wday] += 1
+    if wday == 0 || wday == 6
+      per_hour_we[hour] += out_val; per_hour_we_n[hour] += 1
+      per_hour_we_in[hour] += in_val; per_hour_we_in_n[hour] += 1
+    else
+      per_hour_wd[hour] += out_val; per_hour_wd_n[hour] += 1
+      per_hour_wd_in[hour] += in_val; per_hour_wd_in_n[hour] += 1
+    end
+  end
+
+  avg = ->(sums, counts) { sums.each_with_index.map { |s, i| counts[i] > 0 ? (s / counts[i]).round(4) : 0.0 } }
+  workday_out = avg.call(per_hour_wd, per_hour_wd_n)
+  weekend_out = avg.call(per_hour_we, per_hour_we_n)
+  workday_in = avg.call(per_hour_wd_in, per_hour_wd_in_n)
+  weekend_in = avg.call(per_hour_we_in, per_hour_we_in_n)
+
+  peak_out_workday = workday_out.max
+  zero_threshold_wd = peak_out_workday * 0.05
+  zero_hours_workday = workday_out.each_with_index.select { |v, _| v < zero_threshold_wd }.map(&:last)
+  peak_out_weekend = weekend_out.max
+  zero_threshold_we = peak_out_weekend * 0.05
+  zero_hours_weekend = weekend_out.each_with_index.select { |v, _| v < zero_threshold_we }.map(&:last)
+
+  per_day_out = per_weekday_out.each_with_object({}) do |(k, v), h|
+    h[k.to_s] = (v / [ per_weekday_n[k] / 96.0, 1 ].max).round(2)
+  end
+  per_day_in = per_weekday_in.each_with_object({}) do |(k, v), h|
+    h[k.to_s] = (v / [ per_weekday_n[k] / 96.0, 1 ].max).round(2)
+  end
+
+  {
+    total_kwh_out: total_out.round(2),
+    total_kwh_in: total_in.round(2),
+    peak_15min_kwh: peak_out.round(3),
+    peak_kw: (peak_out * 4).round(2),
+    workday_hourly_avg_out: workday_out,
+    weekend_hourly_avg_out: weekend_out,
+    workday_hourly_avg_in: workday_in,
+    weekend_hourly_avg_in: weekend_in,
+    per_weekday_daily_total_out: per_day_out,
+    per_weekday_daily_total_in: per_day_in,
+    zero_hours_workday: zero_hours_workday,
+    zero_hours_weekend: zero_hours_weekend
+  }
+end
+
+def write_csv(path, readings, synthetic_ean)
+  File.open(path, "w") do |f|
+    f.puts "Datum;Cas od;Cas do;IN-#{synthetic_ean}-D;OUT-#{synthetic_ean}-D"
+    readings.each do |r|
+      t = r["shared_at"]
+      from = t.strftime("%H:%M")
+      to_t = t + 15 * 60
+      to = to_t.strftime("%H:%M")
+      in_val = r["original"].to_f.abs
+      out_val = r["final"].to_f.abs
+      in_s = format("%.3f", in_val).sub(/\.?0+\z/, "").tr(".", ",")
+      in_s = "0" if in_s.empty?
+      out_s = format("%.3f", out_val).sub(/\.?0+\z/, "").tr(".", ",")
+      out_s = "0" if out_s.empty?
+      f.puts "#{t.strftime('%d.%m.%Y')};#{from};#{to};#{in_s};#{out_s};"
+    end
+  end
+end
+
+def address_city(ean)
+  addr = Address.find_by(ean: ean)
+  return nil unless addr
+  if addr.geocoding.is_a?(Hash)
+    addr.geocoding["city"] || addr.geocoding["town"] || addr.geocoding["village"]
+  end
+end
+
+puts "=== Selecting suppliers ==="
+all_suppliers = candidate_suppliers
+puts "  #{all_suppliers.size} producing suppliers available"
+selected_suppliers = diversify(all_suppliers, TARGET_PRODUCTION, "peak_15m")
+puts "  #{selected_suppliers.size} selected (diversified by peak power)"
+puts
+
+puts "=== Selecting customers ==="
+all_customers = candidate_customers
+puts "  #{all_customers.size} consuming customers available"
+selected_customers = diversify(all_customers, TARGET_CONSUMPTION, "total_cons")
+puts "  #{selected_customers.size} selected (diversified by total consumption)"
+puts
+
+manifest = []
+
+puts "=== Processing production entries ==="
+selected_suppliers.each_with_index do |row, idx|
+  ean = row["ean"]
+  month_row = pick_best_month(ean, kind: "production")
+  next unless month_row
+
+  month_start = month_row["m"]
+  month_end = month_start.next_month
+  readings = ActiveRecord::Base.connection.exec_query(
+    ActiveRecord::Base.sanitize_sql_array([
+      "SELECT shared_at, original, final FROM edc_readings WHERE ean = ? AND shared_at >= ? AND shared_at < ? ORDER BY shared_at",
+      ean, month_start, month_end
+    ])
+  ).to_a
+  readings.each { |r| r["shared_at"] = r["shared_at"].is_a?(String) ? Time.zone.parse(r["shared_at"]) : r["shared_at"].in_time_zone("Europe/Prague") }
+
+  peak_kw = row["peak_15m"].to_f * 4
+  est_kwp = (peak_kw * 1.15).ceil
+  agg = aggregates_for(readings)
+
+  days_in_month = month_start.end_of_month.day
+  production_share = { 1 => 0.025, 2 => 0.040, 3 => 0.080, 4 => 0.110, 5 => 0.130, 6 => 0.140,
+                       7 => 0.135, 8 => 0.120, 9 => 0.090, 10 => 0.065, 11 => 0.035, 12 => 0.030 }
+  yearly_surplus_kwh_est = (agg[:total_kwh_out] / production_share[month_start.month]).round(0)
+
+  id = format("P%03d", idx + 1)
+  folder = File.join(DATASET_ROOT, "#{id}_est#{est_kwp}kwp_#{month_start.strftime('%Y_%m')}")
+  FileUtils.mkdir_p(folder)
+
+  synthetic_ean = "eval#{id.downcase}"
+  write_csv(File.join(folder, "real.csv"), readings, synthetic_ean)
+
+  metadata = {
+    id: id,
+    kind: "production",
+    capacity_kwp: est_kwp,
+    capacity_source: "estimated_from_peak",
+    capacity_estimation: { peak_15min_kwh: row["peak_15m"].to_f.round(3), peak_kw: peak_kw.round(2), formula: "ceil(peak_kw * 1.15)" },
+    yearly_surplus_kwh_estimated: yearly_surplus_kwh_est,
+    month: month_start.month,
+    year: month_start.year,
+    days_in_month: days_in_month,
+    rows: readings.size,
+    city: address_city(ean),
+    ean_hash: Digest::SHA256.hexdigest(ean)[0..15],
+    synthetic_ean: synthetic_ean
+  }
+  File.write(File.join(folder, "metadata.json"), JSON.pretty_generate(metadata))
+  File.write(File.join(folder, "aggregates.json"), JSON.pretty_generate(agg))
+
+  manifest << { id: id, folder: File.basename(folder), kind: "production", capacity_kwp: est_kwp, month: "#{month_start.year}-#{month_start.strftime('%m')}", city: metadata[:city] }
+  puts "  #{id} peak #{peak_kw.round(1)} kW est #{est_kwp} kWp total #{agg[:total_kwh_out]} kWh city #{metadata[:city]}"
+end
+
+puts
+puts "=== Processing consumption entries ==="
+selected_customers.each_with_index do |row, idx|
+  ean = row["ean"]
+  month_row = pick_best_month(ean, kind: "consumption")
+  next unless month_row
+
+  month_start = month_row["m"]
+  month_end = month_start.next_month
+  readings = ActiveRecord::Base.connection.exec_query(
+    ActiveRecord::Base.sanitize_sql_array([
+      "SELECT shared_at, original, final FROM edc_readings WHERE ean = ? AND shared_at >= ? AND shared_at < ? ORDER BY shared_at",
+      ean, month_start, month_end
+    ])
+  ).to_a
+  readings.each { |r| r["shared_at"] = r["shared_at"].is_a?(String) ? Time.zone.parse(r["shared_at"]) : r["shared_at"].in_time_zone("Europe/Prague") }
+
+  agg = aggregates_for(readings)
+  days_in_month = month_start.end_of_month.day
+  yearly_consumption_kwh_est = (agg[:total_kwh_in] / (days_in_month / 365.25)).round(0)
+
+  id = format("C%03d", idx + 1)
+  folder = File.join(DATASET_ROOT, "#{id}_#{month_start.strftime('%Y_%m')}")
+  FileUtils.mkdir_p(folder)
+
+  synthetic_ean = "eval#{id.downcase}"
+  write_csv(File.join(folder, "real.csv"), readings, synthetic_ean)
+
+  metadata = {
+    id: id,
+    kind: "consumption",
+    capacity_kwp: nil,
+    yearly_consumption_kwh_estimated: yearly_consumption_kwh_est,
+    month: month_start.month,
+    year: month_start.year,
+    days_in_month: days_in_month,
+    rows: readings.size,
+    city: address_city(ean),
+    ean_hash: Digest::SHA256.hexdigest(ean)[0..15],
+    synthetic_ean: synthetic_ean
+  }
+  File.write(File.join(folder, "metadata.json"), JSON.pretty_generate(metadata))
+  File.write(File.join(folder, "aggregates.json"), JSON.pretty_generate(agg))
+
+  manifest << { id: id, folder: File.basename(folder), kind: "consumption", capacity_kwp: nil, month: "#{month_start.year}-#{month_start.strftime('%m')}", city: metadata[:city] }
+  puts "  #{id} total #{agg[:total_kwh_in]} kWh est yearly #{yearly_consumption_kwh_est} kWh city #{metadata[:city]}"
+end
+
+File.write(File.join(DATASET_ROOT, "MANIFEST.json"), JSON.pretty_generate(manifest))
+puts
+puts "=== Done ==="
+puts "Total entries: #{manifest.size}"
+puts "Manifest: #{File.join(DATASET_ROOT, 'MANIFEST.json')}"
