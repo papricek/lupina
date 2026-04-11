@@ -59,6 +59,12 @@ module Lupina
         nebo podobně a poměr přetoků > 0.1, profil NEMÁ být všude nula — znamená to
         "hodně spotřebujeme, málo jde do sítě", tj. hodnoty jako 0.2-0.4, ne 0.0.
 
+        PRAVIDLO o minimálních hodnotách pro production: pokud je poměr přetoků > 0.05,
+        NIKDY nesmí být celý workday profil samé nuly ani celý weekend profil samé nuly.
+        Minimální hodnota během slunečních hodin (6-18) je 0.1 — pokud popis nezmíní
+        celodenní uzavření. Je-li profil [0,0,...,0], generátor vygeneruje pro daný
+        den nulové přetoky, což je nerealistické — reálný provoz má vždy nějaké zbytky.
+
         DŮLEŽITÉ o konzistenci: Pokud popis říká přetoky v určitou dobu, KAŽDÝ den
         daného typu bude mít přetoky podle profilu. Žádná náhodnost.
 
@@ -86,11 +92,21 @@ module Lupina
         Díky tomu lze vyjádřit JAKÝKOLIV rozvrh (např. přetoky jen ve středu a o víkendu).
 
         Příklady profilů PŘETOKŮ (pro výrobny):
-        FULL = [0,0,0,0,0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0,0,0,0]
-        ZERO = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+        FULL = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        (Pozn. FULL=1.0 po celém dni. Generátor sám přidá solární křivku — tvoje
+        hodnoty jen říkají "kolik z aktuálně vyráběné energie jde do sítě".)
 
-        - Přetoky jen odpoledne po 15h a o víkendech (stroje jedou Po-Pá do 15:00):
-          Po-Pá   [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,1.0,1.0,1.0,1.0,0.5,0,0,0]
+        - Přetoky jen odpoledne po 15h a o víkendech (stroje jedou Po-Pá do 15:00,
+          poměr přetoků ~0.4, takže v pracovních hodinách profil 0.2-0.3, ne nula):
+          Po-Pá   [1,1,1,1,1,1,1,0.3,0.2,0.2,0.2,0.2,0.2,0.2,0.3,1,1,1,1,1,1,1,1,1]
+          So+Ne    FULL
+
+        - "Vše sežereme přes týden" (poměr 0.2, heavy consumption — NENÍ to nula!):
+          Po-Pá   [1,1,1,1,1,1,0.5,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.3,0.5,1,1,1,1,1,1]
+          So+Ne    FULL
+
+        - Dvousměnný provoz 6-22 (poměr ~0.3, spotřeba pokrývá celý světelný den):
+          Po-Pá   [1,1,1,1,1,1,0.3,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,1,1]
           So+Ne    FULL
 
         - Přetoky jen o víkendech a ve středu celý den (Po,Út,Čt,Pá plná spotřeba):

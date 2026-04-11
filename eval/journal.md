@@ -1,6 +1,6 @@
 # Autoresearch journal
 
-RUNNING BEST: 0.2464 at 2026-04-10T23:10 (iter 18: asymmetric envelope 3.5/2.5 morning/afternoon)
+RUNNING BEST: 0.2083 at 2026-04-11 (iter S3.3: prompt tuning — smooth profiles + no-all-zero rule)
 
 ## iter 000 — 2026-04-10T22:00 — BASELINE
 
@@ -267,6 +267,105 @@ Math.sin(phase) ** exponent
 - Annotation errors in eval data (~15% of entries have description/data mismatch)
 - LLM profile granularity (hour-level, can't capture lunch-break dips at 15-min resolution)
 - Low-signal entries (P016, P024) where the metric measures noise
+
+# Session 3 — description_parser.rb unlocked
+
+User asked to lift the ban on editing `description_parser.rb` and let autoresearch tune the LLM prompt itself. Program.md updated, cache keyed by parser-file hash so prompt changes auto-invalidate the cache.
+
+**New baseline under versioned cache:** 0.2478 (vs. 0.2464 under old cache — LLM is non-deterministic, re-parsing gave slightly different profiles).
+
+## iter S3.1 — ACCEPTED (smooth values + softer ratio rules)
+
+Hypothesis: the LLM produces binary 0/1 profiles because the prompt explicitly says "Stačí 1.0 pro hodiny kdy přetoky ano, 0 kdy ne". Real profiles are smooth. Also the "<0.3 ratio → narrow peaks only" rule forces all-zero workday profiles for heavy-consumption cases, which don't match real data.
+
+Edits: removed the binary-is-fine line, softened ratio-based guidance to map to 0.1-0.4 values instead of 0, added explicit instruction that "vše sežereme" ≠ 0 if ratio > 0.1.
+
+Score: 0.2478 → 0.2410 (-0.0068).
+
+| component            | before | after  | Δ      |
+|----------------------|--------|--------|--------|
+| daily_total_mape     | 0.4363 | 0.7714 | +0.335 |
+| hourly_shape_mae     | 0.6239 | 0.4816 | **-0.142** |
+| peak_time_delta      | 5.15   | 2.76   | **-2.39** |
+| weekday_ratio_error  | 0.265  | 42.4   | pegged cap |
+| variance_ratio_error | 0.946  | 0.967  | +0.021 |
+
+**shape_mae -23%** and **peak_time_delta -46%** are huge wins. daily_total_mape and weekday_ratio_error regressed because some entries got non-zero workdays that the real data doesn't have (weekday_ratio_error now capped at the normalizer). Net composite improved because the shape wins dominate.
+
+## iter S3.2 — ACCEPTED (concrete smooth-profile examples)
+
+Hypothesis: add three explicit examples showing smooth profiles (0.2-0.5 values) for common scenarios ("vše sežereme", factory 15:00, two-shift 6-22). The LLM learns better from examples than from abstract rules.
+
+Edits: replaced binary FULL/ZERO examples with smooth ones. Added "vše sežereme" example with 0.2 workday values.
+
+Score: 0.2410 → **0.2213** (-0.0197).
+
+| component            | before | after  | Δ      |
+|----------------------|--------|--------|--------|
+| daily_total_mape     | 0.7714 | 0.5755 | -0.196 |
+| hourly_shape_mae     | 0.4816 | 0.4917 | +0.010 |
+| variance_ratio_error | 0.967  | 0.870  | -0.097 |
+
+Biggest single-iteration improvement in the whole run. Concrete examples work.
+
+## iter S3.3 — ACCEPTED (no-all-zero rule)
+
+Hypothesis: the wre=42 pathology comes from a handful of entries where the LLM still produces all-zero workday profiles despite iter S3.2's examples. Add an explicit rule: if ratio > 0.05, workday profile must have minimum 0.1 during solar hours.
+
+Score: 0.2213 → **0.2083** (-0.0130).
+
+| component            | before | after  | Δ      |
+|----------------------|--------|--------|--------|
+| daily_total_mape     | 0.5755 | 0.3039 | **-0.272** |
+| hourly_shape_mae     | 0.4917 | 0.4847 | -0.007 |
+| peak_time_delta      | 2.79   | 2.66   | -0.13  |
+| weekday_ratio_error  | 42.2   | 42.2   | unchanged (pegged) |
+| variance_ratio_error | 0.870  | 0.776  | -0.094 |
+
+daily_total_mape dropped -47%, the biggest component improvement. The hard rule on minimum values prevents LLM from zeroing out entire days.
+
+## iter S3.4 — REJECTED (too-permissive "vše sežereme" exception)
+
+Hypothesis: some entries (P031, P035, P028) have real data with **actually zero workday export** — the "vše sežereme" description is literally accurate. Allow the LLM to produce zero workdays when ratio < 0.15 and description uses "vše sežereme".
+
+Score: 0.2083 → 0.2230 (+0.0147). Reverted.
+
+Diagnostic dump showed that for P031: real workday total = 1.7 kWh, weekend total = 1013 kWh. For P035: 3.9 vs 4566. These entries legitimately have all export on weekends. My exception was correct for these, but the LLM applied it too broadly, zeroing workdays on entries where real data had non-zero values. Net loss on shape_mae and daily_total_mape outweighed the wre fix.
+
+Conclusion: the zero-vs-non-zero decision can't be made from description alone. Keep the strict rule — it hurts a few true-zero entries but helps the majority. The wre component is capped at 0.15 contribution anyway.
+
+## iter S3.5 — REJECTED (bimodal + east-facing examples)
+
+Hypothesis: adding examples for lunch-break bimodal and east-facing asymmetric patterns might help a few entries (P029 lunch dip, C007 polední pauza).
+
+Score: 0.2083 → 0.2146 (+0.0063). Reverted.
+
+The LLM seems to over-apply these new patterns to entries where they don't fit. More examples ≠ better; the existing set is already at the right specificity.
+
+## Session 3 summary
+
+5 iterations, 3 ACCEPTED (S3.1, S3.2, S3.3), 2 REJECTED (S3.4, S3.5). **Composite 0.2478 → 0.2083. Δ = -0.0395 (-16%).**
+
+**Cumulative (sessions 1+2+3):** 29 iterations, composite **0.2793 → 0.2083 (-25.4%)**.
+
+Key component trajectory:
+
+| component            | baseline | end S1 | end S2 | end S3 | Δ from baseline |
+|----------------------|----------|--------|--------|--------|-----------------|
+| daily_total_mape     | 0.5392   | 0.4677 | 0.4677 | 0.3039 | **-44%**        |
+| hourly_shape_mae     | 0.6909   | 0.6080 | 0.6047 | 0.4847 | **-30%**        |
+| peak_time_delta      | 5.51     | 5.30   | 5.31   | 2.66   | **-52%**        |
+| weekday_ratio_error  | 0.117    | 0.111  | 0.111  | 42.2   | pegged cap      |
+| autocorr_distance    | 0.091    | 0.097  | 0.096  | 0.094  | ~0              |
+| variance_ratio_error | 1.41     | 1.10   | 1.10   | 0.776  | **-45%**        |
+
+Session 3 unlocked the biggest single wins: shape_mae finally moved (had been stuck at 0.608 through sessions 1-2 because it depends on LLM profile quality). Concrete examples in the prompt turned out to be more effective than abstract rules.
+
+**Next exploration directions:**
+- Dig into which consumption profiles are worst (consumption only -5% vs production -19%)
+- Further examples in the prompt targeted at specific failure modes (after examining top-worst cases)
+- Consider a smarter wre metric in the scorer that doesn't blow up on ratio outliers
+
 
 
 
