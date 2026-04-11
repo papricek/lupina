@@ -9,6 +9,8 @@ require "date"
 DATASET_ROOT = File.expand_path("../dataset", __dir__)
 CACHE_ROOT   = File.expand_path("../parse_cache", __dir__)
 REPORT_PATH  = File.expand_path("../score.json", __dir__)
+PARSER_PATH  = File.expand_path("../../lib/lupina/description_parser.rb", __dir__)
+PARSER_HASH  = File.exist?(PARSER_PATH) ? Digest::MD5.hexdigest(File.read(PARSER_PATH))[0, 8] : "unknown"
 
 WEIGHTS = {
   daily_total_mape:    0.25,
@@ -29,9 +31,10 @@ NORMALIZERS = {
 }
 
 def parse_cached(description)
-  FileUtils.mkdir_p(CACHE_ROOT)
+  dir = File.join(CACHE_ROOT, PARSER_HASH)
+  FileUtils.mkdir_p(dir)
   hash = Digest::MD5.hexdigest(description)
-  path = File.join(CACHE_ROOT, "#{hash}.json")
+  path = File.join(dir, "#{hash}.json")
   return JSON.parse(File.read(path)) if File.exist?(path)
   parsed = Lupina.parse_description(description)
   File.write(path, JSON.pretty_generate(parsed))

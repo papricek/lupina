@@ -50,16 +50,27 @@ module Lupina
         - 0.0 = žádné přetoky (vše spotřebováno místně)
         Generátor automaticky aplikuje solární křivku podle měsíce (v zimě slunce 8-16,
         v létě 5-21). Profil jen říká "kolik z toho co se vyrobí jde do sítě".
-        Stačí 1.0 pro hodiny kdy přetoky ano, 0 kdy ne. Nemusí mít tvar zvonu.
-        DŮLEŽITÉ: Pokud popis říká přetoky v určitou dobu, KAŽDÝ den daného typu
-        (pracovní/sobota/neděle) bude mít přetoky podle profilu. Žádná náhodnost.
+
+        DŮLEŽITÉ o hodnotách: používej plynulé hodnoty (0.2, 0.3, 0.5, 0.7) když je
+        spotřeba proměnlivá. Binární 0/1 používej jen když popis explicitně říká
+        "plné přetoky" / "vše do sítě" (→ 1.0) nebo "zavřeno" / "vypnuto" (→ 0.0).
+        Reálná data skoro nikdy nejsou binární — i "heavy consumption" provoz má přetoky
+        v řádu 10-40% během pracovních hodin, ne nulu. Když popis říká "vše sežereme"
+        nebo podobně a poměr přetoků > 0.1, profil NEMÁ být všude nula — znamená to
+        "hodně spotřebujeme, málo jde do sítě", tj. hodnoty jako 0.2-0.4, ne 0.0.
+
+        DŮLEŽITÉ o konzistenci: Pokud popis říká přetoky v určitou dobu, KAŽDÝ den
+        daného typu bude mít přetoky podle profilu. Žádná náhodnost.
 
         OVĚŘENÍ KONZISTENCE: Spočítej poměr přetoků k produkci:
         poměr = roční_přetoky / (kapacita × 1000).
-        - Poměr blízko 1.0 (>0.8) → minimální spotřeba, profily skoro všude 1.0
-        - Poměr 0.3-0.8 → střední spotřeba, profily odpovídají popisu
-        - Poměr <0.3 → vysoká spotřeba, přetoky jen ve špičkách (pauza, víkend)
-        Profily musí být konzistentní s tímto poměrem.
+        - Poměr >0.85 → minimální spotřeba, profily skoro všude 1.0, případné dipy 0.7-0.9
+        - Poměr 0.5-0.85 → střední spotřeba, hodnoty 0.4-0.8 během spotřeby, 1.0 mimo
+        - Poměr 0.2-0.5 → vyšší spotřeba, hodnoty 0.2-0.5 během spotřeby, 1.0 mimo
+        - Poměr <0.2 → velká spotřeba, přetoky ztlumené na 0.1-0.3 i přes den, NIKDY ne 0
+          pokud popis nezmiňuje "zavřeno" nebo "vypnuto"
+        Profily musí být konzistentní s tímto poměrem — zkontroluj si, jestli vážený
+        průměr profilu (přes hodiny se slunečním svitem) přibližně odpovídá poměru.
 
         PRO SPOTŘEBITELE (consumption):
         Profily popisují SPOTŘEBU objektu.

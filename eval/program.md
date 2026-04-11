@@ -17,13 +17,13 @@ Output: overall composite (lower = better), plus 6 weighted components. Baseline
 - `lib/lupina/consumption_edc_generator.rb`
 - `lib/lupina/solar_model.rb`
 - `lib/lupina/day_resolver.rb`
+- `lib/lupina/description_parser.rb` — LLM prompt and post-processing. Changes invalidate the parse cache automatically (the cache is keyed on parser-file hash), so every iteration re-runs 49 Gemini calls (~4 min).
 - New helper files under `lib/lupina/`
 
 ## What you must NOT edit
 
 - `lib/lupina.rb` — public API (would break callers)
 - `lib/lupina/configuration.rb`, `extractor.rb`, `version.rb`
-- `lib/lupina/description_parser.rb` — LLM prompts are orthogonal; leave them alone
 - `eval/**` — harness and data are ground truth
 - `.gemspec`, `Gemfile*`, `sig/**`
 
