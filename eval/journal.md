@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3736 at 2026-05-06T01:30 (initial hourly path implementation)
+RUNNING BEST (hourly path): 0.3664 at 2026-05-06T02:00 (h001 — widened DAILY_FACTOR_RANGE)
 
 ## V3 dataset
 
@@ -134,5 +134,13 @@ Most of the regression vs legacy is in shape_mae and variance_ratio. Both are ex
 Hourly autoresearch starts at 0.3736; first target is to undercut legacy 0.3255 on overall composite.
 
 ## Iterations (hourly path)
+
+## iter h001 — 2026-05-06T02:00 — ACCEPTED
+Hypothesis: hourly's DAILY_FACTOR_RANGE = 0.7..1.3 (var=0.03) is 9× narrower than legacy's effective range (var=0.27), yet hourly's variance_ratio_error is HIGHER (1.36 vs legacy 1.25). Narrowness isn't the cause — widening should bring synth daily-total spread closer to real.
+Diff: hourly_profile_generator.rb:13 (`(0.70..1.30)` → `(0.50..1.50)`)
+Score before: 0.3736 (dmape=6.42, shape=0.61, peak=1.92, ratio=0.36, acf=0.08, var=1.36)
+Score after:  0.3664 (dmape=6.31, shape=0.61, peak=1.94, ratio=0.36, acf=0.08, var=1.23)
+Delta: −0.0072
+Why kept: var_ratio dropped as predicted (-0.13 raw, -0.0026 weighted). dmape also nudged down slightly (capped). No other component meaningfully worse.
 
 
