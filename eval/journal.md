@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3635 at 2026-05-06T02:05 (h002 — DAILY_FACTOR_RANGE 0.4-1.6)
+RUNNING BEST (hourly path): 0.3621 at 2026-05-06T02:08 (h003 — DAILY_FACTOR_RANGE 0.3-1.7)
 
 ## V3 dataset
 
@@ -150,5 +150,13 @@ Score before: 0.3664 (var=1.23)
 Score after:  0.3635 (var=1.20)
 Delta: −0.0029
 Why kept: small but clean improvement. var_ratio still trending toward zero. Other components stable.
+
+## iter h003 — 2026-05-06T02:08 — ACCEPTED
+Hypothesis: continue widening DAILY_FACTOR_RANGE to `0.3..1.7` (var=0.16).
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3635 (var=1.20, dmape=6.26)
+Score after:  0.3621 (var=1.23, dmape=6.20)
+Delta: −0.0014
+Why kept: smaller improvement than h002. var_ratio actually ticked up (overshooting), but dmape ticked down enough to net positive. Gradient on this knob is plateauing — stopping here, switching to a different knob next.
 
 
