@@ -1,0 +1,250 @@
+#!/usr/bin/env ruby
+# Extract V3 dataset from wattlink: 11 EANs × 4 description tiers × {2026-03, 2026-04}.
+# Drops (EAN, month) pairs with <2800 rows or with total_out < capacity_kwp * 5 kWh
+# (clearly broken meters where the xlsx description disagrees with measured export).
+#
+# Run inside wattlink env:
+#   chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/extract-v3-from-wattlink
+
+require "roo"
+require "json"
+require "digest"
+require "fileutils"
+
+XLSX = "/Users/patrikjira/Work/wattlink/tmp/learning_algo_V3.xlsx"
+DATASET_ROOT = "/Users/patrikjira/Work/claude/lupina/eval/dataset"
+MONTHS = [ Date.new(2026, 3, 1), Date.new(2026, 4, 1) ]
+MIN_ROWS = 2800
+MIN_KWH_PER_KWP = 5.0
+
+TIER_KEYS = {
+  4 => "popis",
+  5 => "popis_2",
+  6 => "popis_laik",
+  7 => "popis_zkuseny"
+}
+
+FileUtils.mkdir_p(DATASET_ROOT)
+
+# When xlsx stores a long numeric EAN as a Float, IEEE 754 truncates the
+# trailing digits. To recover the original EAN we group every DB EAN by its
+# Float representation: an xlsx Numeric cell then matches the DB EAN(s) whose
+# Float coerces to the same value.
+DB_EAN_BY_FLOAT = ActiveRecord::Base.connection.exec_query(
+  "SELECT DISTINCT ean FROM edc_readings WHERE ean ~ '^[0-9]{18}$'"
+).to_a.each_with_object(Hash.new { |h, k| h[k] = [] }) do |r, h|
+  h[r["ean"].to_f] << r["ean"]
+end
+
+def aggregates_for(readings)
+  per_hour_wd = Array.new(24, 0.0); per_hour_wd_n = Array.new(24, 0)
+  per_hour_we = Array.new(24, 0.0); per_hour_we_n = Array.new(24, 0)
+  per_hour_wd_in = Array.new(24, 0.0); per_hour_wd_in_n = Array.new(24, 0)
+  per_hour_we_in = Array.new(24, 0.0); per_hour_we_in_n = Array.new(24, 0)
+  per_weekday_out = Hash.new(0.0); per_weekday_in = Hash.new(0.0); per_weekday_n = Hash.new(0)
+
+  total_out = 0.0; total_in = 0.0; peak_out = 0.0
+
+  readings.each do |r|
+    hour = r["shared_at"].hour
+    out_val = r["final"].to_f.abs
+    in_val = r["original"].to_f.abs
+    total_out += out_val
+    total_in += in_val
+    peak_out = out_val if out_val > peak_out
+    wday = r["shared_at"].wday
+    per_weekday_out[wday] += out_val
+    per_weekday_in[wday] += in_val
+    per_weekday_n[wday] += 1
+    if wday == 0 || wday == 6
+      per_hour_we[hour] += out_val; per_hour_we_n[hour] += 1
+      per_hour_we_in[hour] += in_val; per_hour_we_in_n[hour] += 1
+    else
+      per_hour_wd[hour] += out_val; per_hour_wd_n[hour] += 1
+      per_hour_wd_in[hour] += in_val; per_hour_wd_in_n[hour] += 1
+    end
+  end
+
+  avg = ->(sums, counts) { sums.each_with_index.map { |s, i| counts[i] > 0 ? (s / counts[i]).round(4) : 0.0 } }
+  workday_out = avg.call(per_hour_wd, per_hour_wd_n)
+  weekend_out = avg.call(per_hour_we, per_hour_we_n)
+  workday_in = avg.call(per_hour_wd_in, per_hour_wd_in_n)
+  weekend_in = avg.call(per_hour_we_in, per_hour_we_in_n)
+
+  peak_out_workday = workday_out.max
+  zero_threshold_wd = peak_out_workday * 0.05
+  zero_hours_workday = workday_out.each_with_index.select { |v, _| v < zero_threshold_wd }.map(&:last)
+  peak_out_weekend = weekend_out.max
+  zero_threshold_we = peak_out_weekend * 0.05
+  zero_hours_weekend = weekend_out.each_with_index.select { |v, _| v < zero_threshold_we }.map(&:last)
+
+  per_day_out = per_weekday_out.each_with_object({}) do |(k, v), h|
+    h[k.to_s] = (v / [ per_weekday_n[k] / 96.0, 1 ].max).round(2)
+  end
+  per_day_in = per_weekday_in.each_with_object({}) do |(k, v), h|
+    h[k.to_s] = (v / [ per_weekday_n[k] / 96.0, 1 ].max).round(2)
+  end
+
+  {
+    total_kwh_out: total_out.round(2),
+    total_kwh_in: total_in.round(2),
+    peak_15min_kwh: peak_out.round(3),
+    peak_kw: (peak_out * 4).round(2),
+    workday_hourly_avg_out: workday_out,
+    weekend_hourly_avg_out: weekend_out,
+    workday_hourly_avg_in: workday_in,
+    weekend_hourly_avg_in: weekend_in,
+    per_weekday_daily_total_out: per_day_out,
+    per_weekday_daily_total_in: per_day_in,
+    zero_hours_workday: zero_hours_workday,
+    zero_hours_weekend: zero_hours_weekend
+  }
+end
+
+def write_csv(path, readings, synthetic_ean)
+  File.open(path, "w") do |f|
+    f.puts "Datum;Cas od;Cas do;IN-#{synthetic_ean}-D;OUT-#{synthetic_ean}-D"
+    readings.each do |r|
+      t = r["shared_at"]
+      from = t.strftime("%H:%M")
+      to_t = t + 15 * 60
+      to = to_t.strftime("%H:%M")
+      in_val = r["original"].to_f.abs
+      out_val = r["final"].to_f.abs
+      in_s = format("%.3f", in_val).sub(/\.?0+\z/, "").tr(".", ",")
+      in_s = "0" if in_s.empty?
+      out_s = format("%.3f", out_val).sub(/\.?0+\z/, "").tr(".", ",")
+      out_s = "0" if out_s.empty?
+      f.puts "#{t.strftime('%d.%m.%Y')};#{from};#{to};#{in_s};#{out_s};"
+    end
+  end
+end
+
+# Wipe existing dataset (user wants V3 to fully replace it)
+Dir.glob(File.join(DATASET_ROOT, "[CP]*")).each { |d| FileUtils.rm_rf(d) if File.directory?(d) }
+Dir.glob(File.join(DATASET_ROOT, "V3_*")).each { |d| FileUtils.rm_rf(d) if File.directory?(d) }
+
+book = Roo::Spreadsheet.open(XLSX)
+sheet = book.sheet(0)
+
+manifest = []
+counter = 0
+skipped = []
+
+(2..sheet.last_row).each do |xlsx_row_num|
+  row = sheet.row(xlsx_row_num)
+  next if row.compact.empty?
+
+  firma = row[0].to_s.strip
+  ean_cell_raw = row[1]
+  capacity_kwp = row[2].to_f
+  yearly_export_mwh = row[3].to_f
+  yearly_export_kwh = (yearly_export_mwh * 1000).round(0)
+
+  descriptions = TIER_KEYS.each_with_object({}) do |(col, key), h|
+    h[key] = row[col].to_s.strip
+  end
+
+  # EAN cells: when stored as Excel numbers, IEEE 754 Float precision truncates
+  # ~3 digits of an 18-digit EAN. We recover the original by float-equality
+  # lookup against edc_readings (DB_EAN_BY_FLOAT). For String cells (still
+  # stored as text, e.g. multiple EANs in one cell), we extract 18-digit runs.
+  eans =
+    case ean_cell_raw
+    when Numeric
+      DB_EAN_BY_FLOAT[ean_cell_raw.to_f] || []
+    else
+      ean_cell_raw.to_s.scan(/\d{18}/)
+    end
+
+  eans.each do |ean|
+    MONTHS.each do |month_start|
+      month_end = month_start.next_month
+      tz_start = month_start.beginning_of_day.in_time_zone("Europe/Prague")
+      tz_end = month_end.beginning_of_day.in_time_zone("Europe/Prague")
+
+      readings = ActiveRecord::Base.connection.exec_query(
+        ActiveRecord::Base.sanitize_sql_array([
+          "SELECT shared_at, original, final FROM edc_readings WHERE ean = ? AND shared_at >= ? AND shared_at < ? ORDER BY shared_at",
+          ean, tz_start, tz_end
+        ])
+      ).to_a
+      readings.each { |r| r["shared_at"] = r["shared_at"].is_a?(String) ? Time.zone.parse(r["shared_at"]) : r["shared_at"].in_time_zone("Europe/Prague") }
+
+      total_out = readings.sum { |r| r["final"].to_f.abs }
+
+      reason = nil
+      if readings.size < MIN_ROWS
+        reason = "rows=#{readings.size} < #{MIN_ROWS}"
+      elsif total_out < capacity_kwp * MIN_KWH_PER_KWP
+        reason = "total_out=#{total_out.round(1)} < capacity_kwp(#{capacity_kwp}) * #{MIN_KWH_PER_KWP}"
+      end
+
+      if reason
+        skipped << { firma: firma, ean: ean, month: month_start.strftime("%Y-%m"), reason: reason }
+        next
+      end
+
+      counter += 1
+      id = format("V3_%02d", counter)
+      slug = firma.gsub(/[^a-zA-Z0-9]+/, "_").gsub(/_+/, "_").gsub(/^_|_$/, "")[0, 24]
+      folder_name = "#{id}_#{slug}_#{ean[-6..]}_#{month_start.strftime('%Y_%m')}"
+      folder = File.join(DATASET_ROOT, folder_name)
+      FileUtils.mkdir_p(folder)
+
+      synthetic_ean = "eval#{id.downcase.tr('_', '')}"
+      write_csv(File.join(folder, "real.csv"), readings, synthetic_ean)
+      agg = aggregates_for(readings)
+
+      # Use the xlsx "Přetoky (MWh)" column directly as the yearly EXPORT
+      # (přetoky/surplus to grid). Cap at capacity_kwp × 999 to avoid lupina's
+      # >1000 kWh/kWp sanity error (a few xlsx rows have export/capacity > 1).
+      max_yearly = (capacity_kwp * 999).to_i
+      yearly_surplus_kwh_capped = [ yearly_export_kwh, max_yearly ].min
+
+      metadata = {
+        id: id,
+        kind: "production",
+        firma: firma,
+        capacity_kwp: capacity_kwp,
+        capacity_source: "xlsx_v3",
+        yearly_surplus_kwh_estimated: yearly_surplus_kwh_capped,
+        xlsx_yearly_export_mwh: yearly_export_mwh,
+        month: month_start.month,
+        year: month_start.year,
+        days_in_month: month_start.end_of_month.day,
+        rows: readings.size,
+        ean_hash: Digest::SHA256.hexdigest(ean)[0..15],
+        synthetic_ean: synthetic_ean
+      }
+      File.write(File.join(folder, "metadata.json"), JSON.pretty_generate(metadata))
+      File.write(File.join(folder, "aggregates.json"), JSON.pretty_generate(agg))
+      File.write(File.join(folder, "descriptions.json"), JSON.pretty_generate(descriptions))
+
+      manifest << {
+        id: id,
+        folder: folder_name,
+        kind: "production",
+        firma: firma,
+        capacity_kwp: capacity_kwp,
+        yearly_surplus_kwh: yearly_surplus_kwh_capped,
+        month: "#{month_start.year}-#{month_start.strftime('%m')}",
+        rows: readings.size,
+        total_kwh_out: agg[:total_kwh_out],
+        tiers: TIER_KEYS.values
+      }
+      puts "  #{id}  #{firma[0, 24]}  #{month_start.strftime('%Y-%m')}  rows=#{readings.size}  out=#{agg[:total_kwh_out]} kWh  peak=#{agg[:peak_kw]} kW"
+    end
+  end
+end
+
+File.write(File.join(DATASET_ROOT, "MANIFEST.json"), JSON.pretty_generate(manifest))
+
+puts
+puts "=== Done ==="
+puts "Accepted entries: #{manifest.size}"
+puts "Skipped entries:  #{skipped.size}"
+skipped.each { |s| puts "  SKIP  #{s[:firma][0, 24]}  EAN=#{s[:ean]}  #{s[:month]}  reason: #{s[:reason]}" }
+puts
+puts "Manifest: #{File.join(DATASET_ROOT, 'MANIFEST.json')}"
+puts "Cases per loop: #{manifest.size} entries × 4 tiers = #{manifest.size * 4}"

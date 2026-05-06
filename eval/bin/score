@@ -47,8 +47,17 @@ def build_profile(parsed)
   end
 end
 
+def enrich(description, metadata)
+  return description if metadata["kind"] != "production"
+  capacity = metadata["capacity_kwp"]
+  yearly_mwh = (metadata["yearly_surplus_kwh_estimated"].to_f / 1000.0).round(1)
+  prefix = "Solární elektrárna #{capacity} kWp s ročními přetoky #{yearly_mwh} MWh. "
+  return description if description.start_with?(prefix) || description.match?(/\d+\s*kWp/i)
+  prefix + description
+end
+
 def generate_synth(metadata, description)
-  parsed = parse_cached(description)
+  parsed = parse_cached(enrich(description, metadata))
   profile = build_profile(parsed)
   advanced = Lupina.extract_advanced_options(parsed)
 
@@ -207,36 +216,44 @@ def composite_score(components)
   end
 end
 
-folders = Dir.glob(File.join(DATASET_ROOT, "[CP]*")).select { |f| File.directory?(f) }.sort
-puts "Scoring #{folders.size} entries..."
+folders = Dir.glob(File.join(DATASET_ROOT, "V3_*")).select { |f| File.directory?(f) }.sort
+puts "Scoring #{folders.size} entries × 4 tiers = #{folders.size * 4} cases..."
 puts
+
+TIER_ORDER = %w[popis popis_2 popis_laik popis_zkuseny]
 
 results = []
 folders.each do |folder|
-  id = File.basename(folder).split("_").first
+  id = File.basename(folder).split("_")[0..1].join("_")  # "V3_01"
   metadata_path = File.join(folder, "metadata.json")
-  desc_path = File.join(folder, "description.txt")
+  descs_path = File.join(folder, "descriptions.json")
   real_path = File.join(folder, "real.csv")
-  next unless File.exist?(metadata_path) && File.exist?(desc_path) && File.exist?(real_path)
+  next unless File.exist?(metadata_path) && File.exist?(descs_path) && File.exist?(real_path)
 
   metadata = JSON.parse(File.read(metadata_path))
-  description = File.read(desc_path).strip
+  descriptions = JSON.parse(File.read(descs_path))
+  real = parse_csv(File.read(real_path), metadata["kind"])
 
-  begin
-    gen = generate_synth(metadata, description)
-    synth = parse_csv(gen[:csv], metadata["kind"])
-    real = parse_csv(File.read(real_path), metadata["kind"])
-    components = compute_components(synth, real)
-    composite = composite_score(components)
-    results << { id: id, kind: metadata["kind"], composite: composite, components: components }
-    printf "  %-5s [%s] composite=%.4f  dmape=%.2f  shape=%.2f  peak=%.1f  ratio=%.2f  acf=%.2f  var=%.2f\n",
-           id, metadata["kind"][0], composite,
-           components[:daily_total_mape], components[:hourly_shape_mae],
-           components[:peak_time_delta], components[:weekday_ratio_error],
-           components[:autocorr_distance], components[:variance_ratio_error]
-  rescue => e
-    puts "  #{id} FAILED: #{e.class}: #{e.message}"
-    results << { id: id, kind: metadata["kind"], composite: nil, error: e.message }
+  TIER_ORDER.each do |tier|
+    description = descriptions[tier].to_s.strip
+    next if description.empty?
+
+    case_id = "#{id}/#{tier}"
+    begin
+      gen = generate_synth(metadata, description)
+      synth = parse_csv(gen[:csv], metadata["kind"])
+      components = compute_components(synth, real)
+      composite = composite_score(components)
+      results << { id: id, tier: tier, kind: metadata["kind"], composite: composite, components: components }
+      printf "  %-26s composite=%.4f  dmape=%.2f  shape=%.2f  peak=%.1f  ratio=%.2f  acf=%.2f  var=%.2f\n",
+             case_id, composite,
+             components[:daily_total_mape], components[:hourly_shape_mae],
+             components[:peak_time_delta], components[:weekday_ratio_error],
+             components[:autocorr_distance], components[:variance_ratio_error]
+    rescue => e
+      puts "  #{case_id} FAILED: #{e.class}: #{e.message}"
+      results << { id: id, tier: tier, kind: metadata["kind"], composite: nil, error: e.message }
+    end
   end
 end
 
@@ -249,12 +266,22 @@ puts "Scored: #{valid.size}/#{results.size}  (failed: #{failed.size})"
 
 if valid.any?
   overall = valid.sum { |r| r[:composite] } / valid.size.to_f
-  prod = valid.select { |r| r[:kind] == "production" }
-  cons = valid.select { |r| r[:kind] == "consumption" }
 
   puts "Overall composite (lower better): #{overall.round(4)}"
-  puts "  production (#{prod.size}): #{(prod.sum { |r| r[:composite] } / [ prod.size, 1 ].max).round(4)}"
-  puts "  consumption (#{cons.size}): #{(cons.sum { |r| r[:composite] } / [ cons.size, 1 ].max).round(4)}"
+  puts
+  puts "Per-tier composite:"
+  TIER_ORDER.each do |tier|
+    tier_results = valid.select { |r| r[:tier] == tier }
+    next if tier_results.empty?
+    tier_avg = tier_results.sum { |r| r[:composite] } / tier_results.size.to_f
+    printf "  %-15s n=%-2d  composite=%.4f\n", tier, tier_results.size, tier_avg
+  end
+  puts
+  puts "Per-entry composite (averaged over tiers):"
+  valid.group_by { |r| r[:id] }.sort.each do |id, rows|
+    avg = rows.sum { |r| r[:composite] } / rows.size.to_f
+    printf "  %-7s n=%-2d  composite=%.4f\n", id, rows.size, avg
+  end
   puts
   puts "Component averages:"
   WEIGHTS.each_key do |k|
@@ -263,27 +290,31 @@ if valid.any?
     printf "  %-22s raw=%.4f  weighted=%.4f\n", k, avg, weighted
   end
   puts
-  puts "Top 5 worst entries:"
+  puts "Top 5 worst cases:"
   valid.sort_by { |r| -r[:composite] }.first(5).each do |r|
-    puts "  #{r[:id]} composite=#{r[:composite].round(4)}  worst: #{r[:components].max_by { |_, v| v }[0]}"
+    puts "  #{r[:id]}/#{r[:tier]} composite=#{r[:composite].round(4)}  worst: #{r[:components].max_by { |_, v| v }[0]}"
   end
   puts
-  puts "Top 5 best entries:"
+  puts "Top 5 best cases:"
   valid.sort_by { |r| r[:composite] }.first(5).each do |r|
-    puts "  #{r[:id]} composite=#{r[:composite].round(4)}"
+    puts "  #{r[:id]}/#{r[:tier]} composite=#{r[:composite].round(4)}"
   end
 end
 
 if failed.any?
   puts
-  puts "Failed entries:"
-  failed.each { |r| puts "  #{r[:id]}: #{r[:error]}" }
+  puts "Failed cases:"
+  failed.each { |r| puts "  #{r[:id]}/#{r[:tier]}: #{r[:error]}" }
 end
 
 File.write(REPORT_PATH, JSON.pretty_generate({
   overall: valid.any? ? (valid.sum { |r| r[:composite] } / valid.size.to_f) : nil,
   count: valid.size,
   failed: failed.size,
+  per_tier: TIER_ORDER.each_with_object({}) do |tier, h|
+    rows = valid.select { |r| r[:tier] == tier }
+    h[tier] = rows.empty? ? nil : (rows.sum { |r| r[:composite] } / rows.size.to_f)
+  end,
   entries: results
 }))
 puts
