@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3664 at 2026-05-06T02:00 (h001 — widened DAILY_FACTOR_RANGE)
+RUNNING BEST (hourly path): 0.3635 at 2026-05-06T02:05 (h002 — DAILY_FACTOR_RANGE 0.4-1.6)
 
 ## V3 dataset
 
@@ -142,5 +142,13 @@ Score before: 0.3736 (dmape=6.42, shape=0.61, peak=1.92, ratio=0.36, acf=0.08, v
 Score after:  0.3664 (dmape=6.31, shape=0.61, peak=1.94, ratio=0.36, acf=0.08, var=1.23)
 Delta: −0.0072
 Why kept: var_ratio dropped as predicted (-0.13 raw, -0.0026 weighted). dmape also nudged down slightly (capped). No other component meaningfully worse.
+
+## iter h002 — 2026-05-06T02:05 — ACCEPTED
+Hypothesis: gradient from h001 suggests further widening of DAILY_FACTOR_RANGE keeps reducing var_ratio. Try `0.4..1.6` (var=0.12).
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3664 (var=1.23)
+Score after:  0.3635 (var=1.20)
+Delta: −0.0029
+Why kept: small but clean improvement. var_ratio still trending toward zero. Other components stable.
 
 
