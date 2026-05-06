@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3524 at 2026-05-06T02:30 (h006 — DAILY_FACTOR_RANGE 0.2-1.8)
+RUNNING BEST (hourly path): 0.3465 at 2026-05-06T02:42 (h007 — sharper-bell instruction in parser)
 
 ## V3 dataset
 
@@ -183,5 +183,15 @@ Score before: 0.3531
 Score after:  0.3524
 Delta: −0.0007
 Why kept: very marginal but consistent. var_ratio ticked up (1.20 → 1.27) but dmape ticked down enough. Gradient on this knob is now essentially flat — stopping here.
+
+## iter h007 — 2026-05-06T02:42 — ACCEPTED
+Hypothesis: legacy outperforms hourly on V3_04..V3_07 by ~0.06-0.08 per entry because legacy's solar envelope produces sharper bell curves while LLM outputs flatter ones. Strengthen prompt: explicitly require JEDEN JASNÝ VRCHOL with peak ~2-3× active-window average for "domácí FVE / úzký profil" descriptions, distinct from plateau-style for atypical cases.
+Diff: hourly_profile_parser.rb prompt section 4 (rewrite, ~12 lines)
+Score before: 0.3524
+Score after:  0.3465
+Delta: −0.0059
+Per-entry deltas: V3_06 −0.048, V3_07 −0.033 (the two domestic cases moved closest to legacy: 0.174 vs legacy 0.142 and 0.136 vs legacy 0.116). V3_01 +0.007, V3_05 +0.008, V3_03 +0.013 (mild), no big regressions.
+Components: shape_mae 0.59 → 0.58 (slight); peak_time_delta 1.92 → 1.72 (notable); weekday_ratio_error 0.40 → 0.44 (mild regression — perhaps the sharper-peak instruction reduced the LLM's emphasis on weekend/workday split; worth watching).
+Why kept: largest gain since h004. Closes most of the gap to legacy on small-plant entries. Total progress this session 0.3736 → 0.3465 (-0.027). Legacy is at 0.3255 — gap now ~0.02.
 
 

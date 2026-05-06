@@ -83,9 +83,18 @@ module Lupina
            v měsíci #{@month} je rozumný strop kolem #{(@capacity_kwp * solar_peak_fraction).round(1)} kWh/h.
         3. V noci (před východem / po západu slunce) MUSÍ být 0.0. Typický slunovrat:
            leden ~8-16, duben ~6-20, červenec ~5-21, říjen ~7-18 (vše místní čas).
-        4. Tvar křivky odráží spotřebu objektu: rodinný dům typicky uniformní (lidé pryč),
-           továrna/dílna výrazný propad mezi 8-16 (vlastní spotřeba), víkend víc do sítě.
-           Sleduj konkrétní popis — výrazy "domácnost", "víkend zavřeno", "celodenní provoz",
+        4. Tvar křivky odráží spotřebu objektu a typ instalace:
+           - **Domácí FVE / malé instalace s úzkým oknem** (popis říká "profil úzký 9-17",
+             "domácí FVE", "malá FVE", "špička 11-14"): křivka má JASNÝ JEDEN VRCHOL,
+             peak hodina je ~2-3× průměrná hodnota přes aktivní okno.
+             Příklad pro 10 kWp duben, peak ~3 kWh/h, ranní/večerní hraniční hodiny ~0.5-1 kWh/h.
+             NE plochý profil — jasná zvonová křivka.
+           - **Komerční / průmyslové s denní spotřebou** ("továrna", "dílna", "kanceláře",
+             "kravín"): propad přes vlastní spotřebu ve dne, plošší vrchol, víkend výrazně víc.
+           - **Atypicky ploché profily** (popis explicitně říká "atypicky plochý",
+             "rovnoměrně přes celý den", "bez výrazného vrcholu"): generuj SKUTEČNĚ plochou
+             křivku — peak hodina jen 1.1-1.2× průměru aktivního okna.
+           Sleduj konkrétní fráze: "domácnost", "víkend zavřeno", "celodenní provoz",
            "špička 11–15", "atypicky plochý profil" atd.
         5. KRITICKÉ — anchor priority:
            a) Konkrétní čísla pro CÍLOVÝ MĚSÍC v popisu (např. "v dubnu skoro 6 MWh",
