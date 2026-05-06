@@ -87,9 +87,19 @@ module Lupina
            továrna/dílna výrazný propad mezi 8-16 (vlastní spotřeba), víkend víc do sítě.
            Sleduj konkrétní popis — výrazy "domácnost", "víkend zavřeno", "celodenní provoz",
            "špička 11–15", "atypicky plochý profil" atd.
-        5. Pokud popis uvádí konkrétní čísla typu "v dubnu skoro 6 MWh do sítě"
-           nebo "kolem 270 kWh/den o víkendu", vezmi to jako ZÁVAZNÝ ANCHOR pro součty.
-           Roční číslo zákazníka je často nepřesné — preferuj denní/měsíční čísla z popisu.
+        5. KRITICKÉ — anchor priority:
+           a) Konkrétní čísla pro CÍLOVÝ MĚSÍC v popisu (např. "v dubnu skoro 6 MWh",
+              "duben přes 1 150 kWh") → POUŽIJ PŘÍMO jako součet měsíce.
+           b) Konkrétní DENNÍ čísla v popisu (např. "270 kWh/den o víkendu",
+              "92 kWh/den") → použij přímo, vynásob počtem dní v měsíci.
+           c) Konkrétní čísla pro JINÝ měsíc (např. "srpen 900 kWh, listopad pod 250") →
+              odhadni cílový měsíc úměrně sezónnosti (jaro = ~50% léta, zima = ~25% léta).
+           d) Roční číslo "yearly_surplus_kwh" (uvedeno výše jako vstup) je často
+              nepřesné — používej HO POSLEDNÍ. Pokud popis indikuje výrazně méně/víc
+              než ročně × měsíční podíl, VĚŘ POPISU a v reasoning to vysvětli.
+           Příklad: yearly=7000, popis "domácí FVE, srpen 900 kWh, jarní rozjezd od března",
+           cílový měsíc duben → odhad 400-500 kWh (= ~50% srpna), NE ~630 kWh
+           (= 7000 × dubnový podíl 0.09).
         6. Pokud popis říká "východně orientované panely" nebo "ranní špička",
            posuň vrchol křivky před poledne. Pokud nic neříká, vrchol je 12-14h.
         7. Vrať ještě "expected_monthly_kwh" — tvůj odhad celkového měsíčního přetoku

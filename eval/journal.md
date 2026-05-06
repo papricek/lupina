@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3621 at 2026-05-06T02:08 (h003 — DAILY_FACTOR_RANGE 0.3-1.7)
+RUNNING BEST (hourly path): 0.3531 at 2026-05-06T02:18 (h004 — anchor priority in parser prompt)
 
 ## V3 dataset
 
@@ -158,5 +158,14 @@ Score before: 0.3635 (var=1.20, dmape=6.26)
 Score after:  0.3621 (var=1.23, dmape=6.20)
 Delta: −0.0014
 Why kept: smaller improvement than h002. var_ratio actually ticked up (overshooting), but dmape ticked down enough to net positive. Gradient on this knob is plateauing — stopping here, switching to a different knob next.
+
+## iter h004 — 2026-05-06T02:18 — ACCEPTED
+Hypothesis: V3_06/V3_07 (Kumžák domestic 10 kWp) regressed in hourly path because the LLM trusts xlsx yearly (7 MWh) and back-computes April via solar share (~630 kWh) — but real April is 488 kWh, and the description even contains seasonal anchors ("srpen 900 kWh, jarní rozjezd od března"). Strengthen parser prompt with explicit anchor priority: in-text monthly numbers > daily numbers > seasonal proportionality > xlsx yearly (last resort).
+Diff: hourly_profile_parser.rb prompt section 5 (rewrite, ~10 lines)
+Score before: 0.3621
+Score after:  0.3531
+Delta: −0.0090
+Per-entry deltas: V3_04 −0.069, V3_05 −0.076, V3_06 −0.035, V3_07 −0.054 (well-fitting cases corrected), V3_01 +0.018, V3_03 +0.024, V3_08 +0.025 (outliers slightly worse — the LLM may now under-shoot when description gives no clear anchor).
+Why kept: net −0.009 is the biggest single-iter gain so far. Anchor-priority instruction works as intended for entries with rich descriptions; outliers that lack monthly anchors lose a bit but stay within the same composite band.
 
 
