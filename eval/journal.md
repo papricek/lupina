@@ -1,6 +1,7 @@
 # Autoresearch journal — V3 dataset
 
-RUNNING BEST: 0.3255 at 2026-05-06T00:00 (V3 baseline, unmodified lupina at this commit)
+RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
+RUNNING BEST (hourly path): 0.3736 at 2026-05-06T01:30 (initial hourly path implementation)
 
 ## V3 dataset
 
@@ -89,12 +90,49 @@ Score after:  0.3282 (var=1.24)
 Delta: +0.0027
 Why: var_ratio improved tiny bit (-0.01 raw) but other components shifted up slightly (dmape, shape, ratio). Net worse. Confirms that this knob has diminishing returns and interacts non-trivially with other components.
 
-## Pause after 4 rejected iterations
+## Pause after 4 rejected iterations — strategy pivot to hourly path
 
-The composite is dominated by `daily_total_mape` capped at 0.250 weighted (raw 5.41, normalizer 1.5). Generator-only changes can shrink at most the remaining ~0.075 weighted from the other 5 components, and those interact with each other in non-linear ways (iter 001/004). To unlock real movement we need to address the cap — meaning push dmape raw below 1.5.
+The composite on legacy is dominated by `daily_total_mape` capped at 0.250 weighted (raw 5.41, normalizer 1.5). Generator-only changes can shrink at most the remaining ~0.075 weighted from the other 5 components, and those interact with each other in non-linear ways (iter 001/004). To unlock real movement we need to address the cap — meaning push dmape raw below 1.5.
 
-The dataset's underlying issue: 4 of 8 entries (V3_01, V3_02, V3_03, V3_08) have xlsx-yearly that's ~10× higher than measured monthly suggests. No knob in `edc_generator.rb` can compensate. Options are:
-- A) Add a self-consumption discount inside `monthly_surplus_kwh` driven by a parser hint (e.g., parser reads "domácnost", "vlastní spotřeba minimální", or "skoro 6 MWh" specific monthly claims and emits a `monthly_surplus_override_kwh` that EdcGenerator uses if present).
-- B) Accept the cap as a fixed background and only chase the remaining 0.075 weighted via solar/profile/parser tweaks (slow, ceiling around composite 0.25).
-- C) Drop the worst 4 entries from V3 — but then we're not really testing the algorithm's robustness to messy descriptions.
+The dataset's underlying issue: 4 of 8 entries (V3_01, V3_02, V3_03, V3_08) have xlsx-yearly that's ~10× higher than measured monthly suggests. No knob in `edc_generator.rb` can compensate.
+
+**Pivot**: introduce a parallel "hourly absolute profile" path. The LLM produces 24 absolute kWh-per-hour values for typical workday/weekend/holiday, and a script upsamples to 15-min with multiplicative noise + per-day weather factor. The LLM takes on the self-consumption / reconciliation work that no generator knob can do.
+
+---
+
+## Hourly path — initial baseline
+
+**Composite: 0.3736** (worse than legacy 0.3255, but expected — see breakdown).
+
+| Entry | Legacy | Hourly | Δ |
+|---|---|---|---|
+| V3_01 (AGRO L) | 0.487 | 0.444 | **−0.04** ✓ |
+| V3_02 (Nářadí) | 0.433 | 0.448 | +0.01 |
+| V3_03 (Southproject) | 0.406 | 0.386 | **−0.02** ✓ |
+| V3_04 (Vachta Mar) | 0.182 | 0.319 | +0.14 ✗ |
+| V3_05 (Vachta Apr) | 0.242 | 0.368 | +0.13 ✗ |
+| V3_06 (Kumžák Mar) | 0.142 | 0.257 | +0.12 ✗ |
+| V3_07 (Kumžák Apr) | 0.116 | 0.223 | +0.11 ✗ |
+| V3_08 (JS KOVO) | 0.596 | 0.544 | **−0.05** ✓ |
+
+The new path **wins on the outliers** (where the xlsx-yearly chain failed) and **loses on the well-fitting cases** (where the legacy solar prior was structurally right and the LLM's flatter curve dropped fidelity). Classic trade-off: structural prior vs. LLM reasoning.
+
+Component breakdown at hourly baseline:
+- daily_total_mape: 6.42 (worse, +1.0 raw — but capped)
+- hourly_shape_mae: 0.61 (worse, +0.07 raw)
+- variance_ratio_error: 1.36 (worse, +0.11 raw — extrapolator's DAILY_FACTOR_RANGE 0.7-1.3 too wide)
+- peak_time_delta: 1.92 (similar)
+- weekday_ratio_error: 0.36 (similar)
+- autocorr_distance: 0.08 (similar)
+
+Most of the regression vs legacy is in shape_mae and variance_ratio. Both are extrapolator-side, not LLM-side. Likely quick fixes:
+1. Narrow `DAILY_FACTOR_RANGE` (currently 0.7–1.3, ~3× wider than legacy's effective)
+2. Narrow `QUARTER_NOISE_RANGE` (currently 0.9–1.1, may be too wide for periods with low absolute kWh)
+3. Sharpen `INTRA_HOUR_SHAPE` so peak quarters get more than off-peak quarters of the same hour
+4. Adjust the prompt so the LLM produces sharper noon peaks (hourly profile fidelity)
+
+Hourly autoresearch starts at 0.3736; first target is to undercut legacy 0.3255 on overall composite.
+
+## Iterations (hourly path)
+
 

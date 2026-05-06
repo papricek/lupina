@@ -11,6 +11,8 @@ require_relative "lupina/day_resolver"
 require_relative "lupina/edc_generator"
 require_relative "lupina/consumption_edc_generator"
 require_relative "lupina/description_parser"
+require_relative "lupina/hourly_profile_parser"
+require_relative "lupina/hourly_profile_generator"
 
 module Lupina
   class Error < StandardError; end
@@ -70,6 +72,35 @@ module Lupina
 
     def parse_description(description)
       DescriptionParser.new(description: description, model: configuration.model).call
+    end
+
+    # New "hourly absolute profile" path. The LLM produces 24 absolute
+    # kWh-per-hour values for typical workday/weekend/holiday at this
+    # installation in this month; the script upsamples to 15-min with mild
+    # noise. Bypasses the relative_profile × solar_envelope × yearly_target
+    # chain entirely. See lib/lupina/hourly_profile_*.rb.
+    def parse_hourly_profile(description, capacity_kwp:, month:, year: Date.today.year, yearly_surplus_kwh: nil)
+      HourlyProfileParser.new(
+        description: description, capacity_kwp: capacity_kwp,
+        month: month, year: year, yearly_surplus_kwh: yearly_surplus_kwh,
+        model: configuration.model
+      ).call
+    end
+
+    def generate_edc_hourly(description:, capacity_kwp:, month:, year: Date.today.year,
+                            yearly_surplus_kwh: nil, ean: "859182400110224391", seed: nil,
+                            parsed: nil)
+      parsed ||= parse_hourly_profile(description, capacity_kwp: capacity_kwp,
+                                                   month: month, year: year,
+                                                   yearly_surplus_kwh: yearly_surplus_kwh)
+      generator = HourlyProfileGenerator.new(
+        workday_kwh_per_hour: parsed["workday_kwh_per_hour"],
+        weekend_kwh_per_hour: parsed["weekend_kwh_per_hour"],
+        holiday_kwh_per_hour: parsed["holiday_kwh_per_hour"],
+        month: month, year: year, ean: ean, seed: seed
+      )
+      csv = generator.generate
+      { csv: csv, stats: generator.stats, parsed: parsed }
     end
 
     def from_description(description, month:, year: Date.today.year, ean: "859182400110224391", seed: nil)

@@ -21,8 +21,18 @@ Output: overall composite (lower = better), per-tier composite (4 tiers), per-en
 - xlsx "Přetoky (MWh)" column = yearly export, fed directly to lupina (capped at capacity_kwp × 999)
 - ⚠ Several entries (V3_01, V3_02, V3_03, V3_08) have ~10× xlsx-vs-measured discrepancy on yearly export. This dominates `daily_total_mape` and is real dataset signal, not a bug.
 
+## Two parallel paths
+
+The harness now scores either of two architectures, selected via `LUPINA_PATH` env var:
+
+- **`legacy`** (default, baseline 0.3255): description → relative weekday profile → × solar envelope × renormalize to monthly slice of `yearly_surplus_kwh`. Strong solar prior, brittle to xlsx-yearly mismatch.
+- **`hourly`** (baseline 0.3736): description → LLM produces 24 absolute kWh-per-hour values for typical workday/weekend/holiday → script upsamples to 15-min with multiplicative noise + per-day weather factor. LLM does the heavy reasoning; script just extrapolates.
+
+Run with `LUPINA_PATH=hourly chruby-exec ruby-3.2.2 -- bin/rails runner eval/bin/score`. Caches and `score.json` are isolated per path (`eval/parse_cache_hourly/`, `eval/score_hourly.json`).
+
 ## What you may edit
 
+Legacy path:
 - `lib/lupina/edc_generator.rb`
 - `lib/lupina/consumption_edc_generator.rb`
 - `lib/lupina/solar_model.rb`
@@ -30,9 +40,13 @@ Output: overall composite (lower = better), per-tier composite (4 tiers), per-en
 - `lib/lupina/description_parser.rb` — LLM prompt + post-processing. Edits invalidate the parse cache automatically (cache key includes parser-file MD5), so every iteration that touches the parser re-runs ~32 unique Gemini calls (~3–5 min wall clock).
 - New helper files under `lib/lupina/`
 
+Hourly path:
+- `lib/lupina/hourly_profile_parser.rb` — LLM prompt for absolute hourly profiles
+- `lib/lupina/hourly_profile_generator.rb` — extrapolation knobs (`QUARTER_NOISE_RANGE`, `DAILY_FACTOR_RANGE`, `INTRA_HOUR_SHAPE`)
+
 ## What you must NOT edit
 
-- `lib/lupina.rb` — public API (would break callers)
+- `lib/lupina.rb` — public API (would break callers); exception: adding NEW methods is allowed, modifying existing ones is not
 - `lib/lupina/configuration.rb`, `extractor.rb`, `version.rb`
 - `eval/**` — harness and data are ground truth
 - `.gemspec`, `Gemfile*`, `sig/**`

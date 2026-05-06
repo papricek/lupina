@@ -13,4 +13,6 @@
 # reproducible locally via eval/bin/extract-from-wattlink, never committed.
 /eval/dataset/
 /eval/parse_cache/
+/eval/parse_cache_hourly/
 /eval/score.json
+/eval/score_hourly.json

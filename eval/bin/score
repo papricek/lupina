@@ -7,10 +7,15 @@ require "fileutils"
 require "date"
 
 DATASET_ROOT = File.expand_path("../dataset", __dir__)
-CACHE_ROOT   = File.expand_path("../parse_cache", __dir__)
-REPORT_PATH  = File.expand_path("../score.json", __dir__)
-PARSER_PATH  = File.expand_path("../../lib/lupina/description_parser.rb", __dir__)
-PARSER_HASH  = File.exist?(PARSER_PATH) ? Digest::MD5.hexdigest(File.read(PARSER_PATH))[0, 8] : "unknown"
+PATH = ENV.fetch("LUPINA_PATH", "legacy")  # "legacy" or "hourly"
+CACHE_ROOT   = File.expand_path("../parse_cache#{PATH == 'hourly' ? '_hourly' : ''}", __dir__)
+REPORT_PATH  = File.expand_path("../score#{PATH == 'hourly' ? '_hourly' : ''}.json", __dir__)
+PARSER_PATH = if PATH == "hourly"
+  File.expand_path("../../lib/lupina/hourly_profile_parser.rb", __dir__)
+else
+  File.expand_path("../../lib/lupina/description_parser.rb", __dir__)
+end
+PARSER_HASH = File.exist?(PARSER_PATH) ? Digest::MD5.hexdigest(File.read(PARSER_PATH))[0, 8] : "unknown"
 
 WEIGHTS = {
   daily_total_mape:    0.25,
@@ -56,29 +61,50 @@ def enrich(description, metadata)
   prefix + description
 end
 
-def generate_synth(metadata, description)
-  parsed = parse_cached(enrich(description, metadata))
-  profile = build_profile(parsed)
-  advanced = Lupina.extract_advanced_options(parsed)
+def parse_cached_hourly(description, metadata)
+  dir = File.join(CACHE_ROOT, PARSER_HASH)
+  FileUtils.mkdir_p(dir)
+  key = Digest::MD5.hexdigest("#{metadata['capacity_kwp']}|#{metadata['yearly_surplus_kwh_estimated']}|#{metadata['month']}|#{metadata['year']}|#{description}")
+  path = File.join(dir, "#{key}.json")
+  return JSON.parse(File.read(path)) if File.exist?(path)
+  parsed = Lupina.parse_hourly_profile(
+    description,
+    capacity_kwp: metadata["capacity_kwp"].to_f,
+    month: metadata["month"], year: metadata["year"],
+    yearly_surplus_kwh: metadata["yearly_surplus_kwh_estimated"].to_f
+  )
+  File.write(path, JSON.pretty_generate(parsed))
+  parsed
+end
 
-  if metadata["kind"] == "production"
+def generate_synth(metadata, description)
+  if PATH == "hourly"
+    parsed = parse_cached_hourly(description, metadata)
+    Lupina.generate_edc_hourly(
+      description: description,
+      capacity_kwp: metadata["capacity_kwp"].to_f,
+      month: metadata["month"], year: metadata["year"],
+      yearly_surplus_kwh: metadata["yearly_surplus_kwh_estimated"].to_f,
+      seed: 42, parsed: parsed
+    )
+  elsif metadata["kind"] == "production"
+    parsed = parse_cached(enrich(description, metadata))
+    profile = build_profile(parsed)
+    advanced = Lupina.extract_advanced_options(parsed)
     Lupina.generate_edc(
       capacity_kwp: metadata["capacity_kwp"].to_f,
       yearly_surplus_kwh: metadata["yearly_surplus_kwh_estimated"].to_f,
-      month: metadata["month"],
-      year: metadata["year"],
-      surplus_profile: profile,
-      seed: 42,
-      **advanced
+      month: metadata["month"], year: metadata["year"],
+      surplus_profile: profile, seed: 42, **advanced
     )
   else
+    parsed = parse_cached(enrich(description, metadata))
+    profile = build_profile(parsed)
+    advanced = Lupina.extract_advanced_options(parsed)
     Lupina.generate_consumption_edc(
       yearly_consumption_kwh: metadata["yearly_consumption_kwh_estimated"].to_f,
-      month: metadata["month"],
-      year: metadata["year"],
-      consumption_profile: profile,
-      seed: 42,
-      **advanced
+      month: metadata["month"], year: metadata["year"],
+      consumption_profile: profile, seed: 42, **advanced
     )
   end
 end
@@ -217,7 +243,7 @@ def composite_score(components)
 end
 
 folders = Dir.glob(File.join(DATASET_ROOT, "V3_*")).select { |f| File.directory?(f) }.sort
-puts "Scoring #{folders.size} entries × 4 tiers = #{folders.size * 4} cases..."
+puts "Scoring #{folders.size} entries × 4 tiers = #{folders.size * 4} cases  [path=#{PATH}, parser_md5=#{PARSER_HASH}]"
 puts
 
 TIER_ORDER = %w[popis popis_2 popis_laik popis_zkuseny]
