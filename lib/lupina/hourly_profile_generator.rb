@@ -25,7 +25,7 @@ module Lupina
   #   - INTRA_HOUR_SHAPE     how a single hour's kWh is distributed across its 4 slots
   class HourlyProfileGenerator
     QUARTER_NOISE_RANGE = (0.90..1.10).freeze
-    DAILY_FACTOR_RANGE  = (0.30..1.70).freeze
+    DAILY_FACTOR_RANGE  = (0.20..1.80).freeze
     # Weights summing to 4.0 — multiply by hourly/4 to get per-slot kWh.
     # [1.0, 1.0, 1.0, 1.0] = uniform within hour. Future tuning may want
     # a slight ramp (e.g. [0.9, 1.0, 1.05, 1.05]) to match real meter behavior.

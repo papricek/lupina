@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3531 at 2026-05-06T02:18 (h004 — anchor priority in parser prompt)
+RUNNING BEST (hourly path): 0.3524 at 2026-05-06T02:30 (h006 — DAILY_FACTOR_RANGE 0.2-1.8)
 
 ## V3 dataset
 
@@ -167,5 +167,21 @@ Score after:  0.3531
 Delta: −0.0090
 Per-entry deltas: V3_04 −0.069, V3_05 −0.076, V3_06 −0.035, V3_07 −0.054 (well-fitting cases corrected), V3_01 +0.018, V3_03 +0.024, V3_08 +0.025 (outliers slightly worse — the LLM may now under-shoot when description gives no clear anchor).
 Why kept: net −0.009 is the biggest single-iter gain so far. Anchor-priority instruction works as intended for entries with rich descriptions; outliers that lack monthly anchors lose a bit but stay within the same composite band.
+
+## iter h005 — 2026-05-06T02:23 — REJECTED
+Hypothesis: AR(1) correlation between adjacent days (factor[d] = 0.6 × factor[d-1] + 0.4 × sample) should improve autocorr_distance and reflect real cloudy-stretch weather.
+Diff: hourly_profile_generator.rb#generate (~5 lines)
+Score before: 0.3531 (var=1.20, autocorr=0.083)
+Score after:  0.3634 (var=1.44, autocorr=0.081)
+Delta: +0.0103
+Why: AR(1) reduces day-to-day variance (adjacent days now similar). Real already has higher variance than synth, so reducing synth_var pushes |log(synth/real)| further from 0. Autocorr metric barely moved.
+
+## iter h006 — 2026-05-06T02:30 — ACCEPTED (marginal)
+Hypothesis: extend DAILY_FACTOR_RANGE search past h003. Try 0.2..1.8 (var=0.21).
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3531
+Score after:  0.3524
+Delta: −0.0007
+Why kept: very marginal but consistent. var_ratio ticked up (1.20 → 1.27) but dmape ticked down enough. Gradient on this knob is now essentially flat — stopping here.
 
 
