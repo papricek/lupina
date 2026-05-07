@@ -1,0 +1,73 @@
+#!/usr/bin/env ruby
+# Scout consumption candidates: customers with EDC data, sized by total consumption.
+# Run inside wattlink env:
+#   chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/scout-consumption
+
+# Total consumption per customer-EAN
+sql = %q{
+  SELECT r.ean,
+         SUM(ABS(r.original)) AS total_cons,
+         MAX(ABS(r.original)) AS peak_15min,
+         COUNT(*) AS n,
+         MIN(r.shared_at) AS first_at,
+         MAX(r.shared_at) AS last_at
+  FROM edc_readings r
+  WHERE r.ean IN (SELECT ean FROM addresses WHERE role = 'customer' AND edc = true AND ean IS NOT NULL)
+  GROUP BY r.ean
+  HAVING COUNT(*) >= 2800 AND SUM(ABS(r.original)) > 100
+  ORDER BY SUM(ABS(r.original)) DESC
+}
+
+rows = ActiveRecord::Base.connection.exec_query(sql).to_a
+
+puts "=== #{rows.size} consumption EANs with ≥2800 readings and >100 kWh total ==="
+puts
+
+# Distribution buckets — quintile cuts on total consumption
+# (rows already sorted DESC, so index 20% from front is the top-quintile cutoff)
+sorted_vals = rows.map { |r| r["total_cons"].to_f }
+big_cut    = sorted_vals[(rows.size * 0.20).to_i] || 0
+middle_cut = sorted_vals[(rows.size * 0.60).to_i] || 0
+
+big = rows.select { |r| r["total_cons"].to_f >= big_cut }
+mid = rows.select { |r| r["total_cons"].to_f.between?(middle_cut, big_cut) }
+sml = rows.select { |r| r["total_cons"].to_f < middle_cut }
+
+puts "Distribution thresholds:"
+puts "  Big:    >= #{big_cut.round(0)} kWh total  (#{big.size} candidates)"
+puts "  Middle: #{middle_cut.round(0)}-#{big_cut.round(0)} kWh  (#{mid.size} candidates)"
+puts "  Small:  <  #{middle_cut.round(0)} kWh  (#{sml.size} candidates)"
+puts
+
+puts "=== Top 30 by total consumption (BIG) ==="
+big.first(30).each_with_index do |r, i|
+  city = address_city(r["ean"])
+  duration_days = ((r["last_at"].to_time - r["first_at"].to_time) / 86400).round
+  monthly_est = r["total_cons"].to_f / [ duration_days, 1 ].max * 30
+  printf "  %2d. ean=%s total=%9.0f kWh  ~monthly=%6.0f  peak15=%5.2f  n=%d  city=%s\n",
+         i + 1, r["ean"], r["total_cons"].to_f, monthly_est, r["peak_15min"].to_f, r["n"], city
+end
+puts
+puts "=== 20 random middle ==="
+mid.shuffle.first(20).each_with_index do |r, i|
+  city = address_city(r["ean"])
+  printf "  %2d. ean=%s total=%9.0f kWh  peak15=%5.2f  city=%s\n",
+         i + 1, r["ean"], r["total_cons"].to_f, r["peak_15min"].to_f, city
+end
+puts
+puts "=== 5 random small ==="
+sml.shuffle.first(5).each_with_index do |r, i|
+  city = address_city(r["ean"])
+  printf "  %2d. ean=%s total=%9.0f kWh  peak15=%5.2f  city=%s\n",
+         i + 1, r["ean"], r["total_cons"].to_f, r["peak_15min"].to_f, city
+end
+
+BEGIN {
+  def address_city(ean)
+    addr = Address.find_by(ean: ean)
+    return nil unless addr
+    if addr.geocoding.is_a?(Hash)
+      addr.geocoding["city"] || addr.geocoding["town"] || addr.geocoding["village"]
+    end
+  end
+}
