@@ -220,4 +220,29 @@ Per-entry deltas: V3_04 −0.024, V3_03 −0.009, V3_01 −0.003 (entries with r
 Components: shape_mae 0.576 → 0.562 (-0.014, the biggest mover). Net win is real but small.
 Why kept: improvement on the entries where numeric anchors actually exist in the description; small regression elsewhere is offset.
 
+## iter h011 — 2026-05-07T01:15 — REJECTED
+Hypothesis: drop "seasonal reference" lines (other-month numbers when target month not directly anchored) — they were over-anchoring Kumžák cases. Keep only target-month direct anchor + daily totals + windows.
+Diff: anchor_extractor.rb format_for_prompt — removed other_months section.
+Score before: 0.3455
+Score after:  0.3509
+Delta: +0.0054
+Why: V3_04 (Vachta March, no March anchor in description but seasonal context "srpen 235, prosinec 40 implied small plant") jumped +0.048. The LLM relied on seasonal references to calibrate the SCALE for cases without target-month anchors. Removing them sent V3_04 back to legacy-like yearly_surplus interpolation. Trade is asymmetric — keeping seasonal refs is a net win.
+
+## iter h012 — 2026-05-07T01:24 — REJECTED
+Hypothesis: when peak window (e.g., "11–14h") is detected, compute midpoint and add explicit "vrchol kolem 12.5h, ostrá zvonová křivka, peak ~2× průměr" guidance to sharpen V3_06/V3_07.
+Diff: anchor_extractor.rb format_for_prompt — peak_window line expanded.
+Score before: 0.3455
+Score after:  0.3458
+Delta: +0.0003
+Why: marginal regression. h007's prompt section 4 already instructed sharper bell curves for narrow profiles; the additional guidance was redundant and slightly destabilizing.
+
+## Session pause — 13 iterations, 7 ACCEPTED, 4 REJECTED, total Δ = −0.028 (0.3736 → 0.3455)
+
+Composite gap to legacy 0.3255 is now ~0.020. Per-component remaining headroom:
+- daily_total_mape (capped 0.250): immovable on current dataset due to xlsx-vs-real mismatch on V3_01/V3_02/V3_03/V3_08
+- hourly_shape_mae (0.084 weighted): ~0.02 remaining if shape can be sharpened further; diminishing returns on prompt instructions
+- weekday_ratio_error (0.030 weighted): V3_02's hopeless 1.99 dominates; description says 1.65× weekend/workday but real meter shows 7×
+
+The hourly path now beats legacy on the outliers (V3_01, V3_08) and trails legacy on the well-fitting cases (V3_04..V3_07). Closing the remaining gap would require either: (a) verifying ground truth on the four outliers (likely the real bottleneck — descriptions and measurements disagree by 10-25× and no algorithm change can reconcile that), or (b) a more substantial architectural change like archetype + parametric fill (idea #2 from earlier discussion).
+
 
