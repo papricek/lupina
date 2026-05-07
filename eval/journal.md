@@ -289,4 +289,39 @@ Per-entry deltas: V3_06 −0.022, V3_08 −0.013, V3_07 −0.006, V3_02 −0.004
 Components: variance_ratio 1.18 → 1.10, peak_time_delta 1.72 → 1.64, shape_mae 0.566 → 0.560 — broad small improvements.
 Why kept: largest single gain since h004. Direct, mechanistic rule with predictable effect on V3_08.
 
+## iter h018 — 2026-05-07T03:10 — REJECTED
+Hypothesis: parser change in h017 may have shifted DAILY_FACTOR_RANGE optimum again. Try slightly tighter 0.25..1.75.
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3390
+Score after:  0.3394
+Delta: +0.0004
+Why: variance_ratio similar (1.10 → 1.08, marginal). Other components shifted up tiny bits. The DAILY_FACTOR_RANGE = 0.20..1.80 is a stable optimum across parser changes.
+
+## iter h019 — 2026-05-07T03:25 — REJECTED
+Hypothesis: h017's "+10% weekend default" hurt V3_05 (Vachta 3kWp small plant). Refine: small plants (≤15 kWp, "domácí", "rodinný dům") default to weekend ≈ workday; commercial plants (>15 kWp, "firma", "dílna") default to +10% weekend.
+Diff: hourly_profile_parser.rb prompt section 8 — capacity-based default rule.
+Score before: 0.3390
+Score after:  0.3395
+Delta: +0.0005
+Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta and Kumžák defaults). V3_06 +0.011, V3_08 +0.016 (capacity-based heuristic muddied the explicit-description rules from h017 — V3_08 is 30 kWp "firma" but description says "rovnoměrně"; the +10% default may have over-applied despite the equality keyword). Net wash.
+
+## SESSION END — 20 iterations consumed (program.md cap)
+
+Final running best: **0.3390** (down from baseline 0.3736, Δ −0.0346, 9.3% relative).
+Gap to legacy path 0.3255 remaining: **0.0135**.
+
+| Component | Baseline raw | Final raw | Weighted savings |
+|---|---|---|---|
+| daily_total_mape    | 6.42 | 5.59 | 0 (capped at 0.250 throughout) |
+| hourly_shape_mae    | 0.61 | 0.56 | -0.008 |
+| peak_time_delta     | 1.92 | 1.64 | -0.002 |
+| weekday_ratio_error | 0.36 | 0.41 | +0.004 (V3_02 noise dominates) |
+| autocorr_distance   | 0.08 | 0.08 | 0 |
+| variance_ratio_error| 1.36 | 1.10 | -0.005 |
+
+The improvements concentrated in: (a) widening daily-factor variance to match real-day spread, (b) parser anchor preprocessing (idea #7 from the strategy chat), (c) sharper bell-curve and DST-aware peak instructions, (d) explicit weekend/workday rules. The composite is now bottlenecked by daily_total_mape's cap (which itself is bottlenecked by V3_01-V3_03/V3_08 having descriptions that disagree with measurements by 10-25×).
+
+Accepted iterations (committed individually): h001 (-0.0072), h002 (-0.0029), h003 (-0.0014), h004 (-0.0090), h006 (-0.0007), h007 (-0.0059), h010 (-0.0010), h014 (-0.0020), h017 (-0.0045).
+
+
 
