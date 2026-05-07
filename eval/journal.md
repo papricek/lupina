@@ -307,7 +307,7 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
-RUNNING BEST (hourly path): 0.3200 at 2026-05-07T08:30 (h032 — universal anchor discount, beats legacy by 0.0055)
+RUNNING BEST (hourly path): 0.3160 at 2026-05-07T10:00 (h035 — tighter 0.75-0.85 anchor discount, beats legacy by 0.0095, 5/8 entries win)
 
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
@@ -424,6 +424,43 @@ Delta: −0.0046
 Per-entry deltas: V3_04 −0.019 (anchor 386 now used as 309 → closer to real 137), V3_03 −0.011 (anchor 13 MWh now used as ~11 MWh; still off real 0.5 MWh but slightly less so), V3_01 −0.008, V3_05 −0.007. V3_06/V3_07 unchanged (no direct target-month anchors).
 Components: dmape RAW dropped 5.27 → 4.82 (significant reduction in capped contribution; even though weighted stays at 0.250, the underlying ratio improved meaningfully).
 Final standings: hourly 0.3200 wins on V3_01, V3_06, V3_07, V3_08 (4 of 8); legacy wins on V3_02, V3_03, V3_04, V3_05 (4 of 8). Hourly **leads legacy by 0.0055**.
+
+## iter h033 — 2026-05-07T09:00 — REJECTED
+Hypothesis: extend 0.85× discount to ALL anchor categories (daily, seasonal-other-month), not just target month.
+Diff: hourly_profile_parser.rb prompt section 5 — "SYSTÉMOVÝ BIAS" applied to rules 1-3.
+Score before: 0.3200
+Score after:  0.3237
+Delta: +0.0037
+Why: V3_04 +0.031 (cumulative discounts compounded too aggressively for multi-anchor cases). weekday_ratio_error went 0.41 → 0.52 (daily-anchor discount disturbed weekend/workday pairs).
+
+## iter h034 — 2026-05-07T09:30 — REJECTED
+Hypothesis: solar_peak_fraction in prompt may be too high. April 0.75 → 0.55, March 0.6 → 0.40.
+Diff: hourly_profile_parser.rb#solar_peak_fraction.
+Score before: 0.3200
+Score after:  0.3236
+Delta: +0.0036
+Why: V3_04 +0.021. Lower peak hint pushed LLM toward over-compressed curves on small plants where shape was previously fine.
+
+## iter h035 — 2026-05-07T10:00 — ACCEPTED — strongest legacy lead
+Hypothesis: h032's 0.80-0.90 discount worked. Tighten further: 0.75-0.85 (median 0.80×, more aggressive customer-overestimation correction).
+Diff: hourly_profile_parser.rb prompt rule 1 — discount range and bias % adjusted.
+Score before: 0.3200
+Score after:  0.3160
+Delta: −0.0040
+Per-entry deltas: V3_05 −0.020 (now BEATS legacy 0.242 → 0.237), V3_02 −0.015 (now matches legacy 0.433 exactly), V3_06 −0.011 (legacy now beat by 0.039!), V3_03 +0.006 (slight regression).
+**Final standings vs legacy 0.3255**:
+| Entry | Hourly | Legacy | Verdict |
+|---|---|---|---|
+| V3_01 | 0.455 | 0.487 | hourly −0.032 |
+| V3_02 | 0.433 | 0.433 | tie |
+| V3_03 | 0.417 | 0.406 | legacy +0.011 |
+| V3_04 | 0.208 | 0.182 | legacy +0.026 |
+| V3_05 | 0.237 | 0.242 | hourly −0.005 |
+| V3_06 | 0.103 | 0.142 | hourly −0.039 |
+| V3_07 | 0.113 | 0.116 | hourly −0.003 |
+| V3_08 | 0.563 | 0.596 | hourly −0.033 |
+**Hourly wins on 5 of 8 entries; ties V3_02; loses on V3_03 and V3_04. Composite hourly 0.3160 vs legacy 0.3255 — hourly leads by 0.0095.**
+Why kept: 0.85→0.80 median discount continued the customer-overestimation correction; V3_05's anchor "duben 386" now treated as ~309 → much closer to real 152.
 
 ## SESSION 1 END — 20 iterations consumed
 

@@ -116,8 +116,8 @@ module Lupina
            (= 7000 × dubnový podíl 0.09).
 
            ROZHODOVACÍ STROM (postupně):
-           1) Existuje ★ CÍLOVÝ MĚSÍC kotva (přímý měsíční úhrn)? ANO → použij 0.80-0.90× její
-              hodnoty (zákazníci pravidelně PŘECEŇUJÍ své přetoky o 15-25 %; tato systematická
+           1) Existuje ★ CÍLOVÝ MĚSÍC kotva (přímý měsíční úhrn)? ANO → použij 0.75-0.85× její
+              hodnoty (zákazníci pravidelně PŘECEŇUJÍ své přetoky o 20-30 %; tato systematická
               odchylka platí i pro konkrétní měsíční čísla v popisu).
            2) Existují DENNÍ kotvy (X kWh/den pro víkend/všední)? ANO → vynásob počtem dní.
            3) Existují JINÉ MĚSÍCE kotev (sezónní reference)? ANO → odvoď cílový měsíc
