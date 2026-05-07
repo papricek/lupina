@@ -88,10 +88,12 @@ module Lupina
            leden ~8-16, duben ~6-20, červenec ~5-21, říjen ~7-18 (vše místní čas).
         4. Tvar křivky odráží spotřebu objektu a typ instalace:
            - **Domácí FVE / malé instalace s úzkým oknem** (popis říká "profil úzký 9-17",
-             "domácí FVE", "malá FVE", "špička 11-14"): křivka má JASNÝ JEDEN VRCHOL,
-             peak hodina je ~2-3× průměrná hodnota přes aktivní okno.
-             Příklad pro 10 kWp duben, peak ~3 kWh/h, ranní/večerní hraniční hodiny ~0.5-1 kWh/h.
-             NE plochý profil — jasná zvonová křivka.
+             "domácí FVE", "malá FVE", "špička 11-14"): HLADKÁ zvonová křivka — peak
+             hodina je ~1.5-2× průměr přes aktivní okno (NE 3×, to už je příliš ostré).
+             Reálný tvar: pozvolný náběh 9-11h, plošší vrchol 11-14h (peak v 13. h),
+             pozvolný pokles 14-18h. Klíčové: odpoledne 15-17h stále 50-70 % vrcholu,
+             NE pád na 10 %. Příklad 10 kWp duben: 11h 1.5, 12h 2.5, 13h 3.0, 14h 2.7,
+             15h 2.0, 16h 1.3, 17h 0.5 (peak 3.0, průměr ~1.7, peak/průměr ~1.8).
            - **Komerční / průmyslové s denní spotřebou** ("továrna", "dílna", "kanceláře",
              "kravín"): propad přes vlastní spotřebu ve dne, plošší vrchol, víkend výrazně víc.
            - **Atypicky ploché profily** (popis explicitně říká "atypicky plochý",

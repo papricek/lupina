@@ -307,7 +307,7 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
-RUNNING BEST (hourly path): 0.3355 at 2026-05-07T05:00 (h024 — self-verification in prompt)
+RUNNING BEST (hourly path): 0.3350 at 2026-05-07T05:30 (h025 — softened bell-curve rule, peak ~1.5-2× avg)
 
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
@@ -351,6 +351,16 @@ Delta: −0.0014
 Per-entry deltas: V3_06 −0.008, V3_07 −0.009 (Kumžák domestic — the verification step caught small inconsistencies in the curve and tightened them).
 Components: variance_ratio 1.144 → 1.125 (improvement). shape_mae stable. dmape stable (capped).
 Why kept: clean improvement on well-fitting cases. The verification reasoning steers the LLM toward internal consistency without changing total output count.
+
+## iter h025 — 2026-05-07T05:30 — ACCEPTED
+Hypothesis: cache inspection showed LLM produces too-peaky curves for V3_07 — peak 6.2 kWh/h at 13:00 vs real 2.72; afternoon collapses (LLM 15h=0.8 vs real 2.08). Real Czech April FVE has BROADER bells with gradual evening decline. Soften the "sharp bell" rule: peak ~1.5-2× average (not 2-3×), explicit example showing afternoon stays at 50-70% of peak.
+Diff: hourly_profile_parser.rb prompt section 4 — narrow-profile rule rewritten with concrete example.
+Score before: 0.3355
+Score after:  0.3350
+Delta: −0.0005
+Per-entry deltas: V3_06 −0.004, V3_05 −0.004 (clean cases got broader, more realistic curves).
+Cache verification: V3_07 LLM peak shifted 6.2→4.8 kWh/h, afternoon 15h 0.8→1.8 (closer to real 2.08). Mass redistributed from peak to wings.
+Why kept: small but mechanistic. Curve shape is now closer to real, even though dmape can't move past cap.
 
 ## SESSION 1 END — 20 iterations consumed
 
