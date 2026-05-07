@@ -113,7 +113,11 @@ module Lupina
            cílový měsíc duben → odhad 400-500 kWh (= ~50% srpna), NE ~630 kWh
            (= 7000 × dubnový podíl 0.09).
         6. Pokud popis říká "východně orientované panely" nebo "ranní špička",
-           posuň vrchol křivky před poledne. Pokud nic neříká, vrchol je 12-14h.
+           posuň vrchol křivky před poledne.
+           Jinak je vrchol křivky:
+           - V LETNÍM čase (březen poslední neděle - říjen poslední neděle, tedy duben-září plně, duben 2026 = letní čas):
+             solární poledne v Česku je kolem 13:00 SELČ → vrchol v 13. hodině.
+           - V ZIMNÍM čase (listopad-únor + začátek března): solární poledne kolem 12:00 SEČ → vrchol v 12. hodině.
         7. Vrať ještě "expected_monthly_kwh" — tvůj odhad celkového měsíčního přetoku
            v kWh (= součet hodinových za workday × počet všedních dnů + víkend × víkendových).
            Toto je SANITY ANCHOR pro extrapolátor.

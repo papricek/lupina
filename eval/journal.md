@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3455 at 2026-05-07T01:00 (h010 — anchor preprocessing with calibration framing)
+RUNNING BEST (hourly path): 0.3435 at 2026-05-07T02:30 (h014 — DST-aware peak hour)
 
 ## V3 dataset
 
@@ -244,5 +244,23 @@ Composite gap to legacy 0.3255 is now ~0.020. Per-component remaining headroom:
 - weekday_ratio_error (0.030 weighted): V3_02's hopeless 1.99 dominates; description says 1.65× weekend/workday but real meter shows 7×
 
 The hourly path now beats legacy on the outliers (V3_01, V3_08) and trails legacy on the well-fitting cases (V3_04..V3_07). Closing the remaining gap would require either: (a) verifying ground truth on the four outliers (likely the real bottleneck — descriptions and measurements disagree by 10-25× and no algorithm change can reconcile that), or (b) a more substantial architectural change like archetype + parametric fill (idea #2 from earlier discussion).
+
+## iter h013 — 2026-05-07T01:50 — REJECTED
+Hypothesis: LLM produces flat plateaus (e.g., [0,0,0,3,3,3,3,3,2,1]) inside the active window; instructing "no flat plateaus, smooth bell" should sharpen V3_06/V3_07 shapes.
+Diff: hourly_profile_parser.rb prompt section 4 — added "DŮLEŽITÉ — TVAR HODINOVÝCH HODNOT" paragraph.
+Score before: 0.3455
+Score after:  0.3498
+Delta: +0.0043
+Why: V3_06 +0.030. The "no plateaus" instruction added variability but the LLM produced curves with random jitter rather than smoother bells. shape_mae actually got worse (0.562 → 0.576). Variability ≠ accuracy.
+
+## iter h014 — 2026-05-07T02:30 — ACCEPTED
+Hypothesis: real April peak is at 13:00 wall-clock (CEST solar noon ≈13:00 in Czechia) but the LLM may default to 12:00 (literal noon). Real V3_07 peak hour = 13. Instructing the LLM to use 13:00 in DST months and 12:00 in winter time should reduce peak_time_delta and tighten shape on April entries.
+Diff: hourly_profile_parser.rb prompt section 6 — DST-aware peak hour rule.
+Score before: 0.3455
+Score after:  0.3435
+Delta: −0.0020
+Per-entry deltas: V3_07 −0.012, V3_05 −0.020 (both April), V3_01 −0.006, V3_06 −0.003. V3_04 (March) +0.017 (slight regression — the March winter-time instruction may not perfectly fit the 3rd; March 2026 spans DST transition March 29).
+Components: peak_time_delta 1.80 → 1.72 (-0.08 raw, as predicted). variance_ratio also dropped slightly (1.23 → 1.18). shape_mae stable.
+Why kept: clean improvement across most entries; targeted change with predictable mechanism.
 
 
