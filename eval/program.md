@@ -2,25 +2,35 @@
 
 You are an autonomous research agent tuning the Lupina EDC generator. Your job: lower the composite score reported by `eval/bin/score` by modifying the generator's code and re-measuring. Work in a loop until no more improvements can be found, the iteration cap is hit, or 5 consecutive rejections.
 
-## Current state (as of session 2 end)
+## Current state (multi-track)
 
-| Path | Composite | Notes |
-|---|---|---|
-| `legacy` | **0.3255** | Reference baseline (relative profile × solar envelope × yearly target) |
-| `hourly` | **0.3160** | **Active path. Beats legacy by 0.0095. 5 of 8 entries win.** |
+| Path | Dataset | Composite | Notes |
+|---|---|---|---|
+| `legacy` | V3 (production) | **0.3255** | Reference baseline; do not actively tune |
+| `hourly` | V3 (production) | **0.3160** | Tuned over 38 iterations (h001-h035). Beats legacy by 0.0095. 5/8 entries win. |
+| `hourly_consumption` | CV1 (consumption) | **0.1710** | Initial baseline. No iterations yet — open for autoresearch. |
 
-`hourly` is the path under active development. `legacy` stays around as a control baseline; do not actively tune it.
+The two active paths are independent — production iterations and consumption iterations don't interact. Pick one per session.
 
 ## The score
 
 ```bash
 cd /Users/patrikjira/Work/wattlink
+
+# Production V3 hourly path (8 entries × 4 tiers = 32 cases)
 LUPINA_PATH=hourly chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/score
+
+# Consumption CV1 path (40 entries × 2 tiers = 80 cases)
+LUPINA_PATH=hourly_consumption chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/score
+
+# Legacy production baseline (default if no env var)
+LUPINA_PATH=legacy chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/score
 ```
 
-Output: overall composite (lower = better), per-tier composite (4 tiers), per-entry composite (8 entries), 6 weighted components.
-
-To compare against legacy: `LUPINA_PATH=legacy ...` (default if env var omitted).
+Caches/reports per path:
+- `hourly` → `eval/parse_cache_hourly/`, `eval/score_hourly.json`
+- `hourly_consumption` → `eval/parse_cache_consumption/`, `eval/score_consumption.json`
+- `legacy` → `eval/parse_cache/`, `eval/score.json`
 
 ## ⚙ Resume checklist (read first when starting a new session)
 
@@ -73,14 +83,20 @@ Caches and reports are isolated per path:
 - `eval/parse_cache/` and `eval/score.json` — legacy
 - `eval/parse_cache_hourly/` and `eval/score_hourly.json` — hourly
 
-## What you may edit (hourly path is active)
+## What you may edit
 
-- `lib/lupina/hourly_profile_parser.rb` — LLM prompt + post-processing
-- `lib/lupina/hourly_profile_generator.rb` — extrapolation knobs (`QUARTER_NOISE_RANGE`, `DAILY_FACTOR_RANGE`, `INTRA_HOUR_SHAPE`)
-- `lib/lupina/anchor_extractor.rb` — Czech regex extraction of monthly/daily/peak anchors
-- New helper files under `lib/lupina/`
+**Hourly (production V3):**
+- `lib/lupina/hourly_profile_parser.rb` — LLM prompt + post-processing for přetoky
+- `lib/lupina/hourly_profile_generator.rb` — extrapolation knobs (`QUARTER_NOISE_RANGE`, `DAILY_FACTOR_RANGE`, `INTRA_HOUR_SHAPE`). **Shared with consumption path.**
+- `lib/lupina/anchor_extractor.rb` — Czech regex extraction for přetoky anchors
 
-Legacy path files (`edc_generator.rb`, `solar_model.rb`, `day_resolver.rb`, `description_parser.rb`) — only touch if you have a reason to revisit the legacy path.
+**Hourly_consumption (CV1):**
+- `lib/lupina/hourly_consumption_parser.rb` — LLM prompt for spotřeba (sector-aware shape priors, baseline emphasis, no `capacity_kwp`)
+- `lib/lupina/consumption_anchor_extractor.rb` — Czech regex extraction for spotřeba (sector keywords, baseline kW, peak hour, active window)
+
+New helper files under `lib/lupina/` are allowed.
+
+Legacy path files (`edc_generator.rb`, `solar_model.rb`, `day_resolver.rb`, `description_parser.rb`) — only touch if revisiting the legacy path.
 
 ## What you must NOT edit
 
@@ -161,7 +177,7 @@ These are *in* the codebase. Reading the file diffs around them tells you the cu
 | h032 | Universal 0.85× discount on target-month anchors | -0.005 |
 | h035 | Tighten target-month discount to 0.75-0.85 (median 0.80) | -0.004 |
 
-## Promising ideas not yet tried
+## Promising ideas not yet tried — production hourly path
 
 Order roughly by expected value × ease:
 
@@ -173,6 +189,21 @@ Order roughly by expected value × ease:
 6. **Capacity-conditional `DAILY_FACTOR_RANGE`** — small plants have stable daily totals (low real variance), large plants have weather-driven swings. Pass capacity through and use narrower range for ≤15 kWp.
 7. **Refine `AnchorExtractor`** — extract peak intensity claims ("kolem 6 kWh/h"), specific weekend/workday percentages ("o 25 %"), holiday treatment.
 8. **Different LLM model** — try Gemini Pro vs Flash, or Claude. RubyLLM supports model swap.
+
+## Promising ideas — consumption hourly_consumption path
+
+CV1 baseline 0.1710 is already much better than V3 production's first baseline. Don't apply production's "customer overestimation" discount blindly — descriptions for CV1 were generated FROM real measurements, so the bias direction is different. Track LAIK quality (real users will write LAIK-style).
+
+Order by expected value × ease:
+
+1. **Narrower DAILY_FACTOR_RANGE for consumption** — variance_ratio raw is 1.70, suggesting synth daily-total spread is too wide vs stable consumption days. Real consumers (especially industrial 24/7) have very tight daily totals. Try `0.85..1.15` (var=0.0075) for consumption path. The shared generator currently uses production's `0.20..1.80` which is way too wide for consumption. Likely big win.
+2. **Sector-specific peak hour rules** — peak_time_delta raw 3.6 is the most movable component. CV1_17/18 (Frýdek-Místek) have biggest delta. Add explicit rules: residential evening peak (18-19h), office midday (11-13h), industrial 24/7 (no peak), restaurant evening (19-21h), school morning (10-11h).
+3. **Bimodal residential check** — verify residential entries get TWO peaks (morning + evening), not one. Add validation in parser post-processing if missing.
+4. **Heating-aware seasonality calibration** — March (heating still on) vs April (transition) should differ noticeably for heating-dominant accounts. The current `MONTHLY_SHARE` table is generic; tighten for accounts where description mentions "topení" / "v zimě".
+5. **Baseline parsing strength** — `consumption_anchor_extractor` extracts `baseline_kw` when phrased explicitly. Cover more synonyms ("nepřetržitý odběr", "stand-by", "ledničky", "stálá zátěž").
+6. **Per-EAN reasoning trace inspection** — read the cache's `reasoning` field for CV1_17/18 and CV1_11/12 to understand WHY they're worst. Targeted fixes from there.
+7. **Two-pass self-critique** (same idea as production) — single-pass verification helped V3 (-0.001). Two-pass might give more on consumption where the LLM has more freedom (no solar prior to fall back on).
+8. **Sector classifier as separate first call** — small first LLM call returns just sector category, second call uses sector-specific prompt template.
 
 ## Known issues / lessons
 

@@ -7,17 +7,26 @@ require "fileutils"
 require "date"
 
 DATASET_ROOT = File.expand_path("../dataset", __dir__)
-PATH = ENV.fetch("LUPINA_PATH", "legacy")  # "legacy" or "hourly"
-CACHE_ROOT   = File.expand_path("../parse_cache#{PATH == 'hourly' ? '_hourly' : ''}", __dir__)
-REPORT_PATH  = File.expand_path("../score#{PATH == 'hourly' ? '_hourly' : ''}.json", __dir__)
-PARSER_PATHS = if PATH == "hourly"
-  [
-    File.expand_path("../../lib/lupina/hourly_profile_parser.rb", __dir__),
-    File.expand_path("../../lib/lupina/anchor_extractor.rb", __dir__)
-  ]
-else
-  [ File.expand_path("../../lib/lupina/description_parser.rb", __dir__) ]
-end
+PATH = ENV.fetch("LUPINA_PATH", "legacy")  # "legacy", "hourly", or "hourly_consumption"
+
+CACHE_SUFFIX = case PATH
+               when "hourly" then "_hourly"
+               when "hourly_consumption" then "_consumption"
+               else ""
+               end
+CACHE_ROOT   = File.expand_path("../parse_cache#{CACHE_SUFFIX}", __dir__)
+REPORT_PATH  = File.expand_path("../score#{CACHE_SUFFIX}.json", __dir__)
+
+PARSER_PATHS = case PATH
+               when "hourly"
+                 [ File.expand_path("../../lib/lupina/hourly_profile_parser.rb", __dir__),
+                   File.expand_path("../../lib/lupina/anchor_extractor.rb", __dir__) ]
+               when "hourly_consumption"
+                 [ File.expand_path("../../lib/lupina/hourly_consumption_parser.rb", __dir__),
+                   File.expand_path("../../lib/lupina/consumption_anchor_extractor.rb", __dir__) ]
+               else
+                 [ File.expand_path("../../lib/lupina/description_parser.rb", __dir__) ]
+               end
 PARSER_HASH = PARSER_PATHS.select { |p| File.exist?(p) }
                           .map { |p| File.read(p) }
                           .then { |c| c.empty? ? "unknown" : Digest::MD5.hexdigest(c.join)[0, 8] }
@@ -82,6 +91,21 @@ def parse_cached_hourly(description, metadata)
   parsed
 end
 
+def parse_cached_consumption(description, metadata)
+  dir = File.join(CACHE_ROOT, PARSER_HASH)
+  FileUtils.mkdir_p(dir)
+  key = Digest::MD5.hexdigest("#{metadata['yearly_consumption_kwh_estimated']}|#{metadata['month']}|#{metadata['year']}|#{description}")
+  path = File.join(dir, "#{key}.json")
+  return JSON.parse(File.read(path)) if File.exist?(path)
+  parsed = Lupina.parse_consumption_hourly_profile(
+    description,
+    yearly_consumption_kwh: metadata["yearly_consumption_kwh_estimated"].to_f,
+    month: metadata["month"], year: metadata["year"]
+  )
+  File.write(path, JSON.pretty_generate(parsed))
+  parsed
+end
+
 def generate_synth(metadata, description)
   if PATH == "hourly"
     parsed = parse_cached_hourly(description, metadata)
@@ -90,6 +114,14 @@ def generate_synth(metadata, description)
       capacity_kwp: metadata["capacity_kwp"].to_f,
       month: metadata["month"], year: metadata["year"],
       yearly_surplus_kwh: metadata["yearly_surplus_kwh_estimated"].to_f,
+      seed: 42, parsed: parsed
+    )
+  elsif PATH == "hourly_consumption"
+    parsed = parse_cached_consumption(description, metadata)
+    Lupina.generate_edc_consumption_hourly(
+      description: description,
+      yearly_consumption_kwh: metadata["yearly_consumption_kwh_estimated"].to_f,
+      month: metadata["month"], year: metadata["year"],
       seed: 42, parsed: parsed
     )
   elsif metadata["kind"] == "production"
@@ -247,7 +279,8 @@ def composite_score(components)
   end
 end
 
-folders = Dir.glob(File.join(DATASET_ROOT, "V3_*")).select { |f| File.directory?(f) }.sort
+folder_pattern = PATH == "hourly_consumption" ? "CV1_*" : "V3_*"
+folders = Dir.glob(File.join(DATASET_ROOT, folder_pattern)).select { |f| File.directory?(f) }.sort
 puts "Scoring #{folders.size} entries × 4 tiers = #{folders.size * 4} cases  [path=#{PATH}, parser_md5=#{PARSER_HASH}]"
 puts
 

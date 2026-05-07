@@ -14,6 +14,8 @@ require_relative "lupina/description_parser"
 require_relative "lupina/anchor_extractor"
 require_relative "lupina/hourly_profile_parser"
 require_relative "lupina/hourly_profile_generator"
+require_relative "lupina/consumption_anchor_extractor"
+require_relative "lupina/hourly_consumption_parser"
 
 module Lupina
   class Error < StandardError; end
@@ -94,6 +96,32 @@ module Lupina
       parsed ||= parse_hourly_profile(description, capacity_kwp: capacity_kwp,
                                                    month: month, year: year,
                                                    yearly_surplus_kwh: yearly_surplus_kwh)
+      generator = HourlyProfileGenerator.new(
+        workday_kwh_per_hour: parsed["workday_kwh_per_hour"],
+        weekend_kwh_per_hour: parsed["weekend_kwh_per_hour"],
+        holiday_kwh_per_hour: parsed["holiday_kwh_per_hour"],
+        month: month, year: year, ean: ean, seed: seed
+      )
+      csv = generator.generate
+      { csv: csv, stats: generator.stats, parsed: parsed }
+    end
+
+    # Consumption-side counterpart of `parse_hourly_profile` /
+    # `generate_edc_hourly`. The LLM produces 24 absolute kWh-per-hour values
+    # of CONSUMPTION (drawn from grid) for typical workday/weekend/holiday at
+    # the given customer in the given month. Same upsampling pipeline.
+    def parse_consumption_hourly_profile(description, yearly_consumption_kwh:, month:, year: Date.today.year)
+      HourlyConsumptionParser.new(
+        description: description, yearly_consumption_kwh: yearly_consumption_kwh,
+        month: month, year: year, model: configuration.model
+      ).call
+    end
+
+    def generate_edc_consumption_hourly(description:, yearly_consumption_kwh:, month:, year: Date.today.year,
+                                        ean: "859182400110224391", seed: nil, parsed: nil)
+      parsed ||= parse_consumption_hourly_profile(description,
+                                                  yearly_consumption_kwh: yearly_consumption_kwh,
+                                                  month: month, year: year)
       generator = HourlyProfileGenerator.new(
         workday_kwh_per_hour: parsed["workday_kwh_per_hour"],
         weekend_kwh_per_hour: parsed["weekend_kwh_per_hour"],

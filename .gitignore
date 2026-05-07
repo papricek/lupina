@@ -14,5 +14,7 @@
 /eval/dataset/
 /eval/parse_cache/
 /eval/parse_cache_hourly/
+/eval/parse_cache_consumption/
 /eval/score.json
 /eval/score_hourly.json
+/eval/score_consumption.json

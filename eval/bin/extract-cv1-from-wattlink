@@ -1,0 +1,222 @@
+#!/usr/bin/env ruby
+# Extract CV1 (consumption V1) dataset from wattlink: 20 customer EANs × 4 weeks
+# of measurements × 2 description tiers (LAIK + ZKUŠENÝ) = ground truth for the
+# consumption autoresearch harness.
+#
+# Mirrors extract-v3-from-wattlink for production. Same folder shape, same
+# filter logic, kind="consumption" instead of "production".
+#
+# Run inside wattlink env:
+#   chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/extract-cv1-from-wattlink
+
+require "roo"
+require "json"
+require "digest"
+require "fileutils"
+
+XLSX = "/Users/patrikjira/Work/wattlink/tmp/learning_consumption_V1.xlsx"
+DATASET_ROOT = "/Users/patrikjira/Work/claude/lupina/eval/dataset"
+MONTHS = [ Date.new(2026, 3, 1), Date.new(2026, 4, 1) ]
+MIN_ROWS = 2800
+MIN_KWH = 30.0  # below this is a near-dead meter (vs production V3's per-kWp threshold)
+
+TIER_KEYS = {
+  3 => "popis_laik",
+  4 => "popis_zkuseny"
+}
+
+FileUtils.mkdir_p(DATASET_ROOT)
+
+# Build EAN-by-Float lookup so we can recover from xlsx scientific notation
+# (same trick as extract-v3-from-wattlink).
+DB_EAN_BY_FLOAT = ActiveRecord::Base.connection.exec_query(
+  "SELECT DISTINCT ean FROM edc_readings WHERE ean ~ '^[0-9]{18}$'"
+).to_a.each_with_object(Hash.new { |h, k| h[k] = [] }) do |r, h|
+  h[r["ean"].to_f] << r["ean"]
+end
+
+def aggregates_for(readings)
+  # consumption uses `original` (drawn from grid); ignore final/sharing here
+  per_hour_wd = Array.new(24, 0.0); per_hour_wd_n = Array.new(24, 0)
+  per_hour_we = Array.new(24, 0.0); per_hour_we_n = Array.new(24, 0)
+  per_weekday = Hash.new(0.0); per_weekday_n = Hash.new(0)
+  total = 0.0; peak = 0.0
+
+  readings.each do |r|
+    val = r["original"].to_f.abs
+    total += val
+    peak = val if val > peak
+    h = r["shared_at"].hour
+    wday = r["shared_at"].wday
+    if wday == 0 || wday == 6
+      per_hour_we[h] += val; per_hour_we_n[h] += 1
+    else
+      per_hour_wd[h] += val; per_hour_wd_n[h] += 1
+    end
+    per_weekday[wday] += val; per_weekday_n[wday] += 1
+  end
+
+  avg = ->(sums, counts) { sums.each_with_index.map { |s, i| counts[i] > 0 ? (s / counts[i]).round(4) : 0.0 } }
+  workday_in = avg.call(per_hour_wd, per_hour_wd_n)
+  weekend_in = avg.call(per_hour_we, per_hour_we_n)
+
+  per_day_in = per_weekday.each_with_object({}) do |(k, v), h|
+    h[k.to_s] = (v / [ per_weekday_n[k] / 96.0, 1 ].max).round(2)
+  end
+
+  {
+    total_kwh_in: total.round(2),
+    total_kwh_out: 0.0,
+    peak_15min_kwh: peak.round(3),
+    peak_kw: (peak * 4).round(2),
+    workday_hourly_avg_in: workday_in,
+    weekend_hourly_avg_in: weekend_in,
+    workday_hourly_avg_out: Array.new(24, 0.0),
+    weekend_hourly_avg_out: Array.new(24, 0.0),
+    per_weekday_daily_total_in: per_day_in,
+    per_weekday_daily_total_out: per_day_in.each_with_object({}) { |(k, _), h| h[k] = 0.0 },
+    zero_hours_workday: workday_in.each_with_index.select { |v, _| v < workday_in.max * 0.05 }.map(&:last),
+    zero_hours_weekend: weekend_in.each_with_index.select { |v, _| v < (weekend_in.max.zero? ? 0.001 : weekend_in.max * 0.05) }.map(&:last)
+  }
+end
+
+def write_csv(path, readings, synthetic_ean)
+  File.open(path, "w") do |f|
+    # Same header convention as production but with -O suffix (consumption side)
+    # Note: scorer reads col[3]=IN, col[4]=OUT. For consumption we put the
+    # measured drawn-from-grid in IN column; OUT stays 0.
+    f.puts "Datum;Cas od;Cas do;IN-#{synthetic_ean}-O;OUT-#{synthetic_ean}-O"
+    readings.each do |r|
+      t = r["shared_at"]
+      from = t.strftime("%H:%M")
+      to_t = t + 15 * 60
+      to = to_t.strftime("%H:%M")
+      in_val = r["original"].to_f.abs
+      in_s = format("%.3f", in_val).sub(/\.?0+\z/, "").tr(".", ",")
+      in_s = "0" if in_s.empty?
+      f.puts "#{t.strftime('%d.%m.%Y')};#{from};#{to};#{in_s};0;"
+    end
+  end
+end
+
+# Wipe existing CV1 dataset (re-run safely)
+Dir.glob(File.join(DATASET_ROOT, "CV1_*")).each { |d| FileUtils.rm_rf(d) if File.directory?(d) }
+
+book = Roo::Spreadsheet.open(XLSX)
+sheet = book.sheet(0)
+
+manifest_v3 = begin
+  m = JSON.parse(File.read(File.join(DATASET_ROOT, "MANIFEST.json")))
+  (m.is_a?(Array) ? m : []).reject { |e| e["id"].to_s.start_with?("CV1_") }
+rescue
+  []
+end
+manifest = manifest_v3.dup
+counter = 0
+skipped = []
+
+(2..sheet.last_row).each do |xlsx_row_num|
+  row = sheet.row(xlsx_row_num)
+  next if row.compact.empty?
+
+  firma = row[0].to_s.strip
+  ean_cell_raw = row[1]
+  yearly_mwh = row[2].to_f
+  yearly_kwh = (yearly_mwh * 1000).round(0)
+
+  descriptions = TIER_KEYS.each_with_object({}) do |(col, key), h|
+    h[key] = row[col].to_s.strip
+  end
+
+  # When multiple DB EANs share the same Float bucket (xlsx precision loss),
+  # we can't disambiguate from the file alone — pick the first to match the
+  # xlsx row's intended description.
+  eans =
+    case ean_cell_raw
+    when Numeric
+      (DB_EAN_BY_FLOAT[ean_cell_raw.to_f] || []).first(1)
+    else
+      ean_cell_raw.to_s.scan(/\d{18}/)
+    end
+
+  eans.each do |ean|
+    MONTHS.each do |month_start|
+      month_end = month_start.next_month
+      tz_start = month_start.beginning_of_day.in_time_zone("Europe/Prague")
+      tz_end = month_end.beginning_of_day.in_time_zone("Europe/Prague")
+
+      readings = ActiveRecord::Base.connection.exec_query(
+        ActiveRecord::Base.sanitize_sql_array([
+          "SELECT shared_at, original, final FROM edc_readings WHERE ean = ? AND shared_at >= ? AND shared_at < ? ORDER BY shared_at",
+          ean, tz_start, tz_end
+        ])
+      ).to_a
+      readings.each { |r| r["shared_at"] = r["shared_at"].is_a?(String) ? Time.zone.parse(r["shared_at"]) : r["shared_at"].in_time_zone("Europe/Prague") }
+
+      total = readings.sum { |r| r["original"].to_f.abs }
+
+      reason = nil
+      if readings.size < MIN_ROWS
+        reason = "rows=#{readings.size} < #{MIN_ROWS}"
+      elsif total < MIN_KWH
+        reason = "total=#{total.round(1)} < #{MIN_KWH}"
+      end
+
+      if reason
+        skipped << { firma: firma, ean: ean, month: month_start.strftime("%Y-%m"), reason: reason }
+        next
+      end
+
+      counter += 1
+      id = format("CV1_%02d", counter)
+      slug = firma.gsub(/[^a-zA-Z0-9]+/, "_").gsub(/_+/, "_").gsub(/^_|_$/, "")[0, 24]
+      folder_name = "#{id}_#{slug}_#{ean[-6..]}_#{month_start.strftime('%Y_%m')}"
+      folder = File.join(DATASET_ROOT, folder_name)
+      FileUtils.mkdir_p(folder)
+
+      synthetic_ean = "evalcv1#{format('%02d', counter)}"
+      write_csv(File.join(folder, "real.csv"), readings, synthetic_ean)
+      agg = aggregates_for(readings)
+
+      metadata = {
+        id: id,
+        kind: "consumption",
+        firma: firma,
+        capacity_kwp: nil,
+        yearly_consumption_kwh_estimated: yearly_kwh,
+        xlsx_yearly_consumption_mwh: yearly_mwh,
+        month: month_start.month,
+        year: month_start.year,
+        days_in_month: month_start.end_of_month.day,
+        rows: readings.size,
+        ean_hash: Digest::SHA256.hexdigest(ean)[0..15],
+        synthetic_ean: synthetic_ean
+      }
+      File.write(File.join(folder, "metadata.json"), JSON.pretty_generate(metadata))
+      File.write(File.join(folder, "aggregates.json"), JSON.pretty_generate(agg))
+      File.write(File.join(folder, "descriptions.json"), JSON.pretty_generate(descriptions))
+
+      manifest << {
+        id: id,
+        folder: folder_name,
+        kind: "consumption",
+        firma: firma,
+        yearly_consumption_kwh: yearly_kwh,
+        month: "#{month_start.year}-#{month_start.strftime('%m')}",
+        rows: readings.size,
+        total_kwh_in: agg[:total_kwh_in],
+        tiers: TIER_KEYS.values
+      }
+      puts "  #{id}  #{firma[0, 24]}  #{month_start.strftime('%Y-%m')}  rows=#{readings.size}  in=#{agg[:total_kwh_in]} kWh  peak=#{agg[:peak_kw]} kW"
+    end
+  end
+end
+
+File.write(File.join(DATASET_ROOT, "MANIFEST.json"), JSON.pretty_generate(manifest))
+
+puts
+puts "=== Done ==="
+puts "Accepted CV1: #{manifest.size - manifest_v3.size}"
+puts "Skipped:      #{skipped.size}"
+skipped.first(10).each { |s| puts "  SKIP  #{s[:firma][0, 24]}  EAN=#{s[:ean]}  #{s[:month]}  reason: #{s[:reason]}" }
+puts "Total manifest entries: #{manifest.size} (V3: #{manifest_v3.size}, CV1: #{manifest.size - manifest_v3.size})"

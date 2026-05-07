@@ -308,6 +308,7 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
 RUNNING BEST (hourly path): 0.3160 at 2026-05-07T10:00 (h035 — tighter 0.75-0.85 anchor discount, beats legacy by 0.0095, 5/8 entries win)
+RUNNING BEST (hourly_consumption path): 0.1710 at 2026-05-07T13:00 (initial baseline, no tuning yet — descriptions are well-matched to real data)
 
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
@@ -523,3 +524,55 @@ Accepted iterations (committed individually): h001 (-0.0072), h002 (-0.0029), h0
 
 
 
+
+
+## ───────────────────────────────────────────────────────────
+## CV1 (consumption) track starts here
+## ───────────────────────────────────────────────────────────
+
+## CV1 baseline — 2026-05-07T13:00 — 0.1710
+
+Setup:
+- 20 customer EANs from `wattlink/tmp/learning_consumption_V1.xlsx` (12 big + 6 middle + 2 small)
+- × March + April 2026 = 40 (EAN, month) folders
+- × 2 description tiers (popis_laik, popis_zkuseny) = 80 cases per iteration
+
+Components (raw → weighted, lower = better):
+- daily_total_mape:    0.76 → 0.127  ← biggest movable, not capped (good!)
+- hourly_shape_mae:    0.22 → 0.032
+- peak_time_delta:     3.6  → 0.030
+- weekday_ratio_error: 0.03 → 0.002  ← essentially perfect
+- autocorr_distance:   0.06 → 0.003
+- variance_ratio:      1.70 → 0.034
+
+Per-tier:
+- popis_laik:    0.190
+- popis_zkuseny: 0.152  ← surprisingly BETTER than laik on consumption
+  (opposite of production V3, where laik was better)
+
+Per-entry standout cases:
+- Worst: CV1_17 (0.421) Frýdek-Místek, CV1_18 (0.411), CV1_11 (0.261), CV1_12 (0.262)
+- Best:  CV1_08 (0.060), CV1_07 (0.097), CV1_28 (0.087), CV1_16 (0.115)
+
+Why CV1 baseline is so much better than V3 production baseline:
+1. Consumption descriptions (auto-generated from measured aggregates) ARE the
+   reality, not customer self-reports — no "customer overestimation" bias.
+2. dmape RAW (0.76) is well below normalizer (1.5), so dmape is NOT capped.
+3. Consumption profiles have steady baseline + clear active windows that
+   the LLM grasps cleanly from descriptions.
+
+Realistic floor: 0.10-0.13 with autoresearch.
+
+Next iterations should target (in order of expected leverage):
+1. variance_ratio raw 1.70 — synth daily-total spread too wide vs real
+   stable consumption days. Try narrower DAILY_FACTOR_RANGE for consumption.
+2. peak_time_delta 3.6 raw — biggest at CV1_17/18 (Frýdek peaks vary).
+   Likely sector-specific peak hour rules.
+3. hourly_shape 0.22 — already low. Modest improvements possible via
+   sector-specific shape priors.
+4. daily_total 0.76 — already not capped; tighter anchor adherence helps.
+
+Per-tier focus: popis_laik is what real users will write, so optimize for
+laik even at small cost to zkuseny.
+
+## CV1 iterations (cN001+)
