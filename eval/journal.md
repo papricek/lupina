@@ -599,3 +599,13 @@ Score: 0.1297 → 0.1286 (Δ −0.0011, marginal but real)
 Hypothesis: continue widening to 0.75-1.25.
 Diff: lupina.rb
 Score: 0.1286 → 0.1287 (within noise). 0.80-1.20 is the sweet spot.
+
+## iter c005 — 2026-05-07T15:30 — ACCEPTED
+Hypothesis: yearly_consumption_kwh in metadata is historical aggregate; current month may be 10-20% lower (operational changes, energy savings, customer's own solar). Apply 0.90× discount to unanchored yearly-based estimate (rule 4).
+Diff: hourly_consumption_parser.rb prompt rule 4 — added 0.90× discount for "no anchors" path.
+Score before: 0.1286
+Score after:  0.1215
+Delta: −0.0071
+Per-tier deltas: popis_laik 0.190 → 0.144 (much better!), popis_zkuseny 0.152 → 0.099.
+dmape raw 0.65 → 0.60 (-0.05). shape stable. peak slightly improved.
+Why kept: targets the V3-like overestimation issue. CV1_17/18 (Brumovice 96.5 MWh/yr xlsx but real ~810 kWh/month — 12× drop) and similar outliers benefit.
