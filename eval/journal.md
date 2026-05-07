@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3435 at 2026-05-07T02:30 (h014 — DST-aware peak hour)
+RUNNING BEST (hourly path): 0.3390 at 2026-05-07T03:00 (h017 — explicit weekend/workday rule)
 
 ## V3 dataset
 
@@ -262,5 +262,31 @@ Delta: −0.0020
 Per-entry deltas: V3_07 −0.012, V3_05 −0.020 (both April), V3_01 −0.006, V3_06 −0.003. V3_04 (March) +0.017 (slight regression — the March winter-time instruction may not perfectly fit the 3rd; March 2026 spans DST transition March 29).
 Components: peak_time_delta 1.80 → 1.72 (-0.08 raw, as predicted). variance_ratio also dropped slightly (1.23 → 1.18). shape_mae stable.
 Why kept: clean improvement across most entries; targeted change with predictable mechanism.
+
+## iter h015 — 2026-05-07T02:35 — REJECTED
+Hypothesis: parser change in h014 shifted LLM outputs; DAILY_FACTOR_RANGE optimum may have moved. Try wider 0.15..1.85.
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3435
+Score after:  0.3437
+Delta: +0.0002
+Why: variance_ratio worsened slightly (1.18 → 1.23). DAILY_FACTOR_RANGE 0.20..1.80 truly is the optimum.
+
+## iter h016 — 2026-05-07T02:50 — REJECTED
+Hypothesis: split daily factor into independent morning/afternoon factors to match real intra-day weather variation.
+Diff: hourly_profile_generator.rb#generate (~5 lines)
+Score before: 0.3435
+Score after:  0.3581
+Delta: +0.0146
+Why: variance_ratio improved (1.18 → 1.08, GOOD direction) but dmape went up (5.72 → 6.35, capped) and shape worsened. The morning/afternoon asymmetry broke the noon-bell symmetry — synth curves are no longer mirror-symmetric like real solar curves.
+
+## iter h017 — 2026-05-07T03:00 — ACCEPTED
+Hypothesis: V3_08's description says weekend ≈ weekday explicitly ("prakticky není rozdíl, asi 92 kWh/den") but the LLM still produces small split. Add explicit rule to copy workday → weekend exactly when description signals equality, plus rules for explicit percentage offsets.
+Diff: hourly_profile_parser.rb prompt section 8 — new weekend/workday rule.
+Score before: 0.3435
+Score after:  0.3390
+Delta: −0.0045
+Per-entry deltas: V3_06 −0.022, V3_08 −0.013, V3_07 −0.006, V3_02 −0.004 (the equality / direct-percentage rule corrects what the LLM was guessing). V3_05 +0.012 (slight regression — possibly the "default ~+10% weekend" instruction hurt where description didn't explicitly say anything).
+Components: variance_ratio 1.18 → 1.10, peak_time_delta 1.72 → 1.64, shape_mae 0.566 → 0.560 — broad small improvements.
+Why kept: largest single gain since h004. Direct, mechanistic rule with predictable effect on V3_08.
 
 

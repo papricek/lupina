@@ -122,6 +122,15 @@ module Lupina
            v kWh (= součet hodinových za workday × počet všedních dnů + víkend × víkendových).
            Toto je SANITY ANCHOR pro extrapolátor.
 
+        8. VÍKEND vs VŠEDNÍ DEN:
+           - Pokud popis říká "rovnoměrně", "stejně", "bez rozdílu", "prakticky nelze rozlišit"
+             nebo podobně → weekend_kwh_per_hour MUSÍ být IDENTICKÉ s workday_kwh_per_hour
+             (kopíruj pole, nezavlékej drobné rozdíly).
+           - Pokud popis říká "víkend víc o X %" → weekend = workday × (1 + X/100).
+           - Pokud popis říká "víkend méně o X %" → weekend = workday × (1 − X/100).
+           - Bez jakékoli zmínky → drobný rozdíl (víkend mírně vyšší, ~+10 %, kvůli typicky nižší
+             vlastní spotřebě o víkendu) je rozumný default.
+
         SPECIÁLNÍ PŘÍPADY:
         - Pokud popis výrazně rozporuje roční číslo (např. zákazník tvrdí 25 MWh/rok ale
           popisuje "domácnost 10 kWp s minimální spotřebou v dubnu", odpovídá ~500 kWh
