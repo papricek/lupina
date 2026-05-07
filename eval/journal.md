@@ -307,7 +307,7 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
-RUNNING BEST (hourly path): 0.3246 at 2026-05-07T07:30 (h030 — capacity-tiered discount, BEATS legacy 0.3255 by 0.0009)
+RUNNING BEST (hourly path): 0.3200 at 2026-05-07T08:30 (h032 — universal anchor discount, beats legacy by 0.0055)
 
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
@@ -406,6 +406,24 @@ Delta: −0.0040
 Per-entry deltas: V3_06 −0.026, V3_07 −0.013, V3_08 −0.009, V3_01 −0.004 (4 wins). V3_03 +0.010, V3_04 +0.010 (2 regressions, modest).
 **FINAL standings**: hourly wins on V3_01, V3_06, V3_07, V3_08 (4 of 8); legacy wins on V3_02, V3_03, V3_04, V3_05 (4 of 8). Overall hourly 0.3246 vs legacy 0.3255 — hourly leads by 0.0009.
 Why kept: capacity-tiered rule is robust (works regardless of description vocabulary). The 0.75× default for small plants compensates for the systematic customer overestimation seen across V3_06/V3_07. Total session 1+2 progress: 0.3736 → 0.3246 (-0.049, 13.2% improvement). LEGACY BEATEN.
+
+## iter h031 — 2026-05-07T07:50 — REJECTED
+Hypothesis: with new LLM outputs from h027/h030, DAILY_FACTOR_RANGE optimum may have shifted. Try narrower 0.30-1.70 (var 0.163, was 0.27).
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3246
+Score after:  0.3289
+Delta: +0.0043
+Why: variance_ratio went up (1.32 → 1.34). Crossed the synth_var=real_var threshold. The 0.20-1.80 (var=0.27) is a stable optimum across parser changes.
+
+## iter h032 — 2026-05-07T08:30 — ACCEPTED — bigger legacy lead
+Hypothesis: per-tier analysis showed popis_zkuseny (specific anchors) is WORST tier (0.337) vs popis_laik (vague) BEST (0.322). Customers systematically overestimate monthly export when stating it (zkuseny tier prone to this). Add universal 0.80-0.90× discount to ★ target-month anchor (rule 1 of decision tree).
+Diff: hourly_profile_parser.rb prompt rule (1) — apply 0.80-0.90× discount to direct monthly anchors.
+Score before: 0.3246
+Score after:  0.3200
+Delta: −0.0046
+Per-entry deltas: V3_04 −0.019 (anchor 386 now used as 309 → closer to real 137), V3_03 −0.011 (anchor 13 MWh now used as ~11 MWh; still off real 0.5 MWh but slightly less so), V3_01 −0.008, V3_05 −0.007. V3_06/V3_07 unchanged (no direct target-month anchors).
+Components: dmape RAW dropped 5.27 → 4.82 (significant reduction in capped contribution; even though weighted stays at 0.250, the underlying ratio improved meaningfully).
+Final standings: hourly 0.3200 wins on V3_01, V3_06, V3_07, V3_08 (4 of 8); legacy wins on V3_02, V3_03, V3_04, V3_05 (4 of 8). Hourly **leads legacy by 0.0055**.
 
 ## SESSION 1 END — 20 iterations consumed
 
