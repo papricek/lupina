@@ -584,3 +584,18 @@ Score before: 0.1710 (var=1.70, dmape=0.76, shape=0.22, peak=3.6)
 Score after:  0.1297 (var=0.79, dmape=0.65, shape=0.22, peak=3.7)
 Delta: −0.0413
 Why kept: massive variance_ratio reduction (-0.91 raw), bonus dmape improvement from less overshoot (-0.11 raw). Production V3 path untouched (defaults preserved). Confirms: consumption needs different extrapolation knobs than production.
+
+## iter c002 — 2026-05-07T14:45 — REJECTED
+Hypothesis: variance_ratio still 0.79 (synth ~2× real). Try narrower 0.90-1.10.
+Diff: lupina.rb CONSUMPTION_DAILY_FACTOR_RANGE
+Score: 0.1297 → 0.1337 (var=0.79→0.97). Overshoot — 0.85-1.15 was the optimum.
+
+## iter c003 — 2026-05-07T14:50 — ACCEPTED
+Hypothesis: try wider 0.80-1.20 instead of narrower.
+Diff: lupina.rb CONSUMPTION_DAILY_FACTOR_RANGE
+Score: 0.1297 → 0.1286 (Δ −0.0011, marginal but real)
+
+## iter c004 — 2026-05-07T14:55 — REJECTED
+Hypothesis: continue widening to 0.75-1.25.
+Diff: lupina.rb
+Score: 0.1286 → 0.1287 (within noise). 0.80-1.20 is the sweet spot.

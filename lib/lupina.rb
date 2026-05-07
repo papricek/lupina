@@ -119,7 +119,7 @@ module Lupina
 
     # Tunable knob: consumers have stable daily totals (vs solar plants which
     # have weather-driven swings). Narrow daily-factor range here.
-    CONSUMPTION_DAILY_FACTOR_RANGE  = (0.85..1.15).freeze
+    CONSUMPTION_DAILY_FACTOR_RANGE  = (0.80..1.20).freeze
     CONSUMPTION_QUARTER_NOISE_RANGE = (0.95..1.05).freeze
 
     def generate_edc_consumption_hourly(description:, yearly_consumption_kwh:, month:, year: Date.today.year,
