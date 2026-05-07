@@ -307,7 +307,7 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
-RUNNING BEST (hourly path): 0.3350 at 2026-05-07T05:30 (h025 — softened bell-curve rule, peak ~1.5-2× avg)
+RUNNING BEST (hourly path): 0.3286 at 2026-05-07T06:30 (h027 — anchor decision tree + self-consumption discount)
 
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
@@ -361,6 +361,25 @@ Delta: −0.0005
 Per-entry deltas: V3_06 −0.004, V3_05 −0.004 (clean cases got broader, more realistic curves).
 Cache verification: V3_07 LLM peak shifted 6.2→4.8 kWh/h, afternoon 15h 0.8→1.8 (closer to real 2.08). Mass redistributed from peak to wings.
 Why kept: small but mechanistic. Curve shape is now closer to real, even though dmape can't move past cap.
+
+## iter h026 — 2026-05-07T06:00 — REJECTED
+Hypothesis: include exact V3_07-real-data hourly values as a worked example in the prompt to anchor the LLM's curve shape more concretely.
+Diff: hourly_profile_parser.rb prompt section 4 — added specific "real data!" example with 9-17h values.
+Score before: 0.3350
+Score after:  0.3444
+Delta: +0.0094
+Why: V3_06 +0.048. The example overfit the LLM's output to V3_07's specific values, which then mismatched V3_06 (similar plant, different month). Lesson: avoid concrete real-data examples in the prompt; abstract guidance only.
+
+## iter h027 — 2026-05-07T06:30 — ACCEPTED — biggest win since h004
+Hypothesis: section 5d (anchor priority for yearly_surplus) was vague — "use it last, trust description". Add an explicit decision tree: (1) target-month direct anchor → use ±10%; (2) daily anchors → multiply by days; (3) other-month seasonal refs → use share table (duben/srpen ~0.65, březen/srpen ~0.40, listopad/srpen ~0.10, conservatively low end); (4) no anchors AND domestic → apply default 0.7-0.8× discount.
+Diff: hourly_profile_parser.rb prompt section 5 — added "ROZHODOVACÍ STROM" subsection.
+Score before: 0.3350
+Score after:  0.3286
+Delta: −0.0064 (largest single-iter win since Loop 1's h004)
+Per-entry deltas: V3_06 −0.020, V3_04 −0.016, V3_05 −0.011, V3_02 −0.007, V3_07 −0.005 (5 of 8 entries improved meaningfully). V3_01 +0.004, V3_08 +0.004 (small, dominated by data noise).
+Components: shape_mae 0.561 → 0.547 (-0.014 raw), dmape 5.61 → 5.51 (still capped but improving).
+Versus legacy 0.3255: gap now 0.003. **V3_06 (0.138) now BEATS legacy (0.142).** Hourly wins on V3_01, V3_06, V3_08; ties V3_03; trails on V3_02, V3_04, V3_05, V3_07.
+Why kept: clean mechanistic improvement on the cleanest dataset entries; the explicit discount rule for unanchored domestic plants targets exactly the V3_04/V3_05/V3_06/V3_07 cluster.
 
 ## SESSION 1 END — 20 iterations consumed
 

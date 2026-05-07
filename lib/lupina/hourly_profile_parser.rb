@@ -114,6 +114,16 @@ module Lupina
            Příklad: yearly=7000, popis "domácí FVE, srpen 900 kWh, jarní rozjezd od března",
            cílový měsíc duben → odhad 400-500 kWh (= ~50% srpna), NE ~630 kWh
            (= 7000 × dubnový podíl 0.09).
+
+           ROZHODOVACÍ STROM (postupně):
+           1) Existuje ★ CÍLOVÝ MĚSÍC kotva (přímý měsíční úhrn)? ANO → použij ji ±10 %.
+           2) Existují DENNÍ kotvy (X kWh/den pro víkend/všední)? ANO → vynásob počtem dní.
+           3) Existují JINÉ MĚSÍCE kotev (sezónní reference)? ANO → odvoď cílový měsíc
+              z měsíčních podílů: duben/srpen ~ 0.65, březen/srpen ~ 0.40, listopad/srpen ~ 0.10.
+              Konzervativně: spíš nižší konec rozsahu.
+           4) Žádné kotvy? POUŽIJ yearly × měsíční podíl, ale když je popis "domácnost",
+              "rodinný dům", "malá", aplikuj DEFAULT discount 0.7-0.8× (lidé spotřebují víc
+              než zákazník odhaduje při hlášení ročního přetoku).
         6. Pokud popis říká "východně orientované panely" nebo "ranní špička",
            posuň vrchol křivky před poledne.
            Jinak je vrchol křivky:
