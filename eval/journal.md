@@ -618,3 +618,13 @@ Score after:  0.1214
 Delta: −0.0001 (within noise floor)
 Per-entry deltas: CV1_11 0.164 → 0.080 (-0.084, peak_delta 12 → 3.0!), CV1_12 ~0.16 → 0.075 (-0.085, peak_delta 13 → 1.25), CV1_10 0.272 → 0.209 (-0.063). Three big wins on heating cases. Small regressions elsewhere offset most of the net gain.
 Why kept: targeted rule worked exactly as intended on heating-dominant entries. Net improvement is noise-level but mechanism is sound.
+
+## iter c007 — 2026-05-07T18:00 — ACCEPTED
+Hypothesis: c005's 0.90× discount worked well; tighten to 0.85× (target 15-25% bias).
+Diff: hourly_consumption_parser.rb prompt rule 4 — discount 0.90 → 0.85.
+Score before: 0.1214
+Score after:  0.1170
+Delta: −0.0044
+Per-tier: popis_laik 0.144 → 0.136, popis_zkuseny 0.098 → 0.098 (stable).
+Components: peak_time_delta 3.55 → 2.99 (big improvement!), dmape 0.60 → 0.59. variance 0.72 → 0.70.
+Why kept: same dynamic as V3 production h032 — universal customer-overestimation correction. The peak_time_delta improvement is unexpected (probably the discount aligns curve totals so the LLM places peak more correctly).

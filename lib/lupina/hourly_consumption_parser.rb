@@ -122,9 +122,9 @@ module Lupina
            2) DENNÍ kotvy ("550 kWh/den všední, 200 kWh/den víkend")? ANO → vynásob počtem dní.
            3) JINÉ MĚSÍCE kotev? ANO → odvoď cílový měsíc z výše uvedené sezónní křivky.
               Konzervativně.
-           4) Žádné kotvy → použij yearly_consumption_kwh × měsíční podíl × 0.90×.
+           4) Žádné kotvy → použij yearly_consumption_kwh × měsíční podíl × 0.85×.
               (Roční číslo často reprezentuje historická data; aktuální měsíc může být
-              o 10-20 % nižší kvůli změnám provozu, energetickým úsporám, nebo solární
+              o 15-25 % nižší kvůli změnám provozu, energetickým úsporám, nebo solární
               spotřebě klienta. Konzervativní discount kompenzuje tento bias.)
 
         5. BASELINE & PEAK & DENNÍ CYKLUS.
