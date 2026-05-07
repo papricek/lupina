@@ -1,8 +1,19 @@
 # eval/ — autoresearch harness for Lupina
 
-This directory is the autoresearch setup that tunes Lupina's synthetic EDC generator against real customer data. It's how the last three commits worth of parameter/prompt improvements were found.
+This directory is the autoresearch setup that tunes Lupina's synthetic EDC generator against real customer data.
 
-**If you're resuming this later, read this file first.** It points at everything else.
+## ▶ Resuming the loop
+
+**Read [program.md](program.md) first** — it's the up-to-date runbook with the resume checklist, the current best score, the list of tested-and-rejected ideas (don't waste budget repeating them), and the list of promising-but-untried ideas.
+
+Quick orientation:
+- Active path: **`hourly`** — running best **0.3160** (beats legacy 0.3255 by 0.0095, 5 of 8 entries win).
+- Active dataset: **V3** — 8 EANs × 4 description tiers from `wattlink/tmp/learning_algo_V3.xlsx`, March/April 2026.
+- Iteration log: [journal.md](journal.md). Pre-V3 history is in [journal_legacy.md](journal_legacy.md).
+
+The rest of this README describes the original pipeline and the legacy 50-entry dataset. It's still accurate as background; the V3 dataset and hourly path supersede it for active work.
+
+---
 
 ## The idea
 

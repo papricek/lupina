@@ -1,17 +1,58 @@
 # Autoresearch program — Lupina generator tuning (V3 dataset)
 
-You are an autonomous research agent tuning the Lupina EDC generator. Your job: lower the composite score reported by `eval/bin/score` by modifying the generator's code and re-measuring. Work in a loop until no more improvements can be found or a fixed number of iterations is reached.
+You are an autonomous research agent tuning the Lupina EDC generator. Your job: lower the composite score reported by `eval/bin/score` by modifying the generator's code and re-measuring. Work in a loop until no more improvements can be found, the iteration cap is hit, or 5 consecutive rejections.
+
+## Current state (as of session 2 end)
+
+| Path | Composite | Notes |
+|---|---|---|
+| `legacy` | **0.3255** | Reference baseline (relative profile × solar envelope × yearly target) |
+| `hourly` | **0.3160** | **Active path. Beats legacy by 0.0095. 5 of 8 entries win.** |
+
+`hourly` is the path under active development. `legacy` stays around as a control baseline; do not actively tune it.
 
 ## The score
 
 ```bash
 cd /Users/patrikjira/Work/wattlink
-chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/score
+LUPINA_PATH=hourly chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/score
 ```
 
 Output: overall composite (lower = better), per-tier composite (4 tiers), per-entry composite (8 entries), 6 weighted components.
 
-**Baseline to beat: 0.3255** (V3 dataset, unmodified lupina at the commit that introduced the V3 harness).
+To compare against legacy: `LUPINA_PATH=legacy ...` (default if env var omitted).
+
+## ⚙ Resume checklist (read first when starting a new session)
+
+1. **Confirm git state**:
+   ```bash
+   git -C /Users/patrikjira/Work/claude/lupina status              # should be clean
+   git -C /Users/patrikjira/Work/claude/lupina log --oneline -5     # see most recent accepted iterations
+   tail -20 /Users/patrikjira/Work/claude/lupina/eval/journal.md    # see RUNNING BEST and recent attempts
+   ```
+
+2. **Set up bundler local override** (so wattlink loads lupina from disk, not GitHub) — required for fast parser iteration:
+   ```bash
+   cd /Users/patrikjira/Work/wattlink
+   chruby-exec ruby-3.2.2 -- bundle config --local local.lupina /Users/patrikjira/Work/claude/lupina
+   chruby-exec ruby-3.2.2 -- bundle install
+   chruby-exec ruby-3.2.2 -- bundle info lupina | head -5    # Path: should be /Users/patrikjira/Work/claude/lupina
+   ```
+
+3. **Confirm baseline** matches journal:
+   ```bash
+   LUPINA_PATH=hourly chruby-exec ruby-3.2.2 -- bin/rails runner /Users/patrikjira/Work/claude/lupina/eval/bin/score | grep "Overall composite"
+   # Should show 0.316 (or whatever the current RUNNING BEST line says)
+   ```
+
+4. **At session end**, after pushing accepted iterations to GitHub:
+   ```bash
+   git -C /Users/patrikjira/Work/claude/lupina push origin main
+   cd /Users/patrikjira/Work/wattlink
+   chruby-exec ruby-3.2.2 -- bundle config unset local.lupina    # if you want wattlink to fetch from GitHub
+   chruby-exec ruby-3.2.2 -- bundle install
+   git add Gemfile.lock && git commit -m "Bump lupina to <new-sha>"
+   ```
 
 ## Dataset shape
 
@@ -19,34 +60,31 @@ Output: overall composite (lower = better), per-tier composite (4 tiers), per-en
 - Tiers: `popis` (technical short), `popis_2` (technical medium), `popis_laik` (layman), `popis_zkuseny` (expert with numbers)
 - Real CSVs from wattlink `edc_readings`, March/April 2026
 - xlsx "Přetoky (MWh)" column = yearly export, fed directly to lupina (capped at capacity_kwp × 999)
-- ⚠ Several entries (V3_01, V3_02, V3_03, V3_08) have ~10× xlsx-vs-measured discrepancy on yearly export. This dominates `daily_total_mape` and is real dataset signal, not a bug.
+- ⚠ Several entries (V3_01, V3_02, V3_03, V3_08) have ~10-25× xlsx-vs-measured discrepancy on yearly export. **`daily_total_mape` is dataset-noise-bound at 0.250 weighted on the cap; do not chase it directly.**
 
 ## Two parallel paths
 
-The harness now scores either of two architectures, selected via `LUPINA_PATH` env var:
+The harness scores either of two architectures via `LUPINA_PATH` env var:
 
-- **`legacy`** (default, baseline 0.3255): description → relative weekday profile → × solar envelope × renormalize to monthly slice of `yearly_surplus_kwh`. Strong solar prior, brittle to xlsx-yearly mismatch.
-- **`hourly`** (baseline 0.3736): description → LLM produces 24 absolute kWh-per-hour values for typical workday/weekend/holiday → script upsamples to 15-min with multiplicative noise + per-day weather factor. LLM does the heavy reasoning; script just extrapolates.
+- **`legacy`** (baseline 0.3255): description → relative weekday profile (`DescriptionParser`) → × solar envelope × renormalize to monthly slice of `yearly_surplus_kwh`. Strong solar prior, brittle to xlsx-yearly mismatch.
+- **`hourly`** (current best 0.3160): description → LLM produces 24 absolute kWh-per-hour values for typical workday/weekend/holiday (`HourlyProfileParser`) → script upsamples to 15-min with multiplicative noise + per-day weather factor (`HourlyProfileGenerator`). LLM does the heavy reasoning; script just extrapolates. Anchor preprocessing in `AnchorExtractor`.
 
-Run with `LUPINA_PATH=hourly chruby-exec ruby-3.2.2 -- bin/rails runner eval/bin/score`. Caches and `score.json` are isolated per path (`eval/parse_cache_hourly/`, `eval/score_hourly.json`).
+Caches and reports are isolated per path:
+- `eval/parse_cache/` and `eval/score.json` — legacy
+- `eval/parse_cache_hourly/` and `eval/score_hourly.json` — hourly
 
-## What you may edit
+## What you may edit (hourly path is active)
 
-Legacy path:
-- `lib/lupina/edc_generator.rb`
-- `lib/lupina/consumption_edc_generator.rb`
-- `lib/lupina/solar_model.rb`
-- `lib/lupina/day_resolver.rb`
-- `lib/lupina/description_parser.rb` — LLM prompt + post-processing. Edits invalidate the parse cache automatically (cache key includes parser-file MD5), so every iteration that touches the parser re-runs ~32 unique Gemini calls (~3–5 min wall clock).
+- `lib/lupina/hourly_profile_parser.rb` — LLM prompt + post-processing
+- `lib/lupina/hourly_profile_generator.rb` — extrapolation knobs (`QUARTER_NOISE_RANGE`, `DAILY_FACTOR_RANGE`, `INTRA_HOUR_SHAPE`)
+- `lib/lupina/anchor_extractor.rb` — Czech regex extraction of monthly/daily/peak anchors
 - New helper files under `lib/lupina/`
 
-Hourly path:
-- `lib/lupina/hourly_profile_parser.rb` — LLM prompt for absolute hourly profiles
-- `lib/lupina/hourly_profile_generator.rb` — extrapolation knobs (`QUARTER_NOISE_RANGE`, `DAILY_FACTOR_RANGE`, `INTRA_HOUR_SHAPE`)
+Legacy path files (`edc_generator.rb`, `solar_model.rb`, `day_resolver.rb`, `description_parser.rb`) — only touch if you have a reason to revisit the legacy path.
 
 ## What you must NOT edit
 
-- `lib/lupina.rb` — public API (would break callers); exception: adding NEW methods is allowed, modifying existing ones is not
+- `lib/lupina.rb` — public API. Adding NEW methods is allowed; modifying existing ones is not.
 - `lib/lupina/configuration.rb`, `extractor.rb`, `version.rb`
 - `eval/**` — harness and data are ground truth
 - `.gemspec`, `Gemfile*`, `sig/**`
@@ -55,61 +93,94 @@ Hourly path:
 
 For each iteration:
 
-1. Read the last 3 journal entries (or all if <3) from `eval/journal.md` to see what's been tried.
-2. Form ONE hypothesis about what might lower the score. Be specific: which component, which file, which lines, which direction. Look at the per-tier or per-entry breakdown to target where the algorithm is weakest.
-3. Run `eval/bin/verify` to establish current test state — if it fails, fix first before experimenting.
+1. Read the last 3 journal entries from `eval/journal.md` to see what's been tried.
+2. Form ONE hypothesis. Be specific: which component is the target, which file, which lines, which direction. Look at per-tier and per-entry breakdown to identify weakness.
+3. Run `eval/bin/verify` — if it fails, fix first.
 4. Make the edit. Keep changes small and isolated (≤20 lines diff).
 5. Run `eval/bin/verify` — if it fails, revert (`git checkout -- <file>`) and try a different hypothesis.
 6. Run `eval/bin/score`. Compare composite to running best.
 7. **If score improved**:
    - Keep the change.
    - Update RUNNING BEST in `eval/journal.md`.
-   - Append a journal entry with `ACCEPTED` (see format below).
-   - **`git commit` the change with a short message describing the hypothesis and the score delta.** This is required — every accepted iteration becomes its own commit so the research history is replayable.
+   - Append journal entry with `ACCEPTED`.
+   - `git commit` the lupina source change + journal update. Each accepted iteration becomes its own commit.
 8. **If score regressed**:
-   - Revert the change (`git checkout -- <file>`).
-   - Append a journal entry with `REJECTED` and a short reason.
+   - Revert (`git checkout -- <file>`).
+   - Append journal entry with `REJECTED` and a one-sentence "Why".
    - Do NOT commit on rejection.
 9. Go to step 1.
 
-## Commit format
-
-After step 7, commit with:
+### Commit format
 
 ```bash
 git -C /Users/patrikjira/Work/claude/lupina add lib/lupina/<file>.rb eval/journal.md
-git -C /Users/patrikjira/Work/claude/lupina commit -m "iter NNN: <hypothesis short> (-0.0XXX)"
+git -C /Users/patrikjira/Work/claude/lupina commit -m "iter hNNN: <short> (-0.0XXX)"
 ```
 
-Stage only the lupina source files you edited and `eval/journal.md`. Do NOT stage `eval/score.json` (regenerated every run) or anything under `eval/dataset/` or `eval/parse_cache/` (gitignored).
+Stage only edited lupina source + `eval/journal.md`. Do NOT stage `eval/score*.json` or anything under `eval/dataset/` / `eval/parse_cache*/` (gitignored).
 
-## Journal format
+## Tested ideas (don't repeat)
 
-Append to `eval/journal.md` after each iteration:
+These have been tried and rejected — don't waste iteration budget re-testing without a strong reason:
 
-```markdown
-## iter 001 — 2026-05-06T22:10 — ACCEPTED
-Hypothesis: <one or two sentences. Which component, which file, which knob, which direction>
-Diff: <file:line, brief description, e.g. "edc_generator.rb:98 daily factor range 0.7..1.3 → 0.6..1.4">
-Score before: 0.3255 (dmape=5.41, shape=0.54, peak=1.80, ratio=0.37, acf=0.09, var=1.25)
-Score after:  0.3210 (dmape=4.98, shape=0.54, peak=1.80, ratio=0.36, acf=0.09, var=1.20)
-Delta: -0.0045
-Per-tier deltas: popis -0.005  popis_2 -0.004  popis_laik -0.005  popis_zkuseny -0.004
-Commit: <short sha>
-```
+| Idea | Iter | Result |
+|---|---|---|
+| AR(1) correlated daily factors | h005 | +0.010 — adjacent-day correlation reduces variance below real |
+| Constant daily factor (var=0) | h003 | +0.067 — synth_var << real_var |
+| `DAILY_FACTOR_RANGE` narrowing past 0.20-1.80 | h008/h015/h018/h031 | All marginal regressions; 0.20-1.80 is stable optimum |
+| Soften solar envelope morning 3.5→3.0 | h002 | small regression |
+| Drop seasonal-reference anchors | h011 | hurts cases without target-month anchor |
+| Bare-number anchor extraction (e.g. "duben 386") | h021 | overfits when description claims diverge from reality |
+| Upper-bound flag for "pod X" | h022 | counter-intuitive — fixed cap was useful winter ceiling |
+| 3-tap Gaussian smoothing on hourly arrays | h023 | flattens peaks, shape_mae worse |
+| AM/PM split daily factor | h016 | breaks noon-bell symmetry |
+| Concrete real-data example in prompt | h026 | overfits to one entry, hurts similar ones |
+| "No flat plateaus" instruction | h013 | adds jitter, not bell shape |
+| Lower `solar_peak_fraction` 0.75→0.55 | h034 | over-compresses curves |
+| Extend anchor discount to all categories (not just target) | h033 | cumulative discounts compound, V3_04 +0.031 |
+| Tighten target-month discount past 0.80 (try 0.75) | h036 | over-discounts reasonable claims |
+| Cross-check rule (anchor vs yearly×share) | h037 | pushes good anchors to yearly-based, hurts cases where anchor was right |
 
-For REJECTED entries, omit the commit line and add a one-sentence "Why" line.
+## Accepted ideas (current state baked in)
 
-## Seed hypotheses (try these first if you have no ideas)
+These are *in* the codebase. Reading the file diffs around them tells you the current rules:
 
-The biggest weighted contributor is `daily_total_mape` (raw 5.41, weighted at 0.250 cap). Several entries have xlsx-yearly that's ~10× higher than measured monthly suggests — meaning lupina spreads too much energy into each day. Tunes that help here move the most score.
+| Iter | What | Δ |
+|---|---|---|
+| h001-h003, h006 | Widen `DAILY_FACTOR_RANGE` to 0.20-1.80 | -0.012 cumulative |
+| h004 | Anchor priority in parser prompt | -0.009 |
+| h007 | Sharper bell curves for narrow domestic profiles | -0.006 |
+| h010 | `AnchorExtractor` with calibration framing | -0.001 |
+| h014 | DST-aware peak hour (13 in summer, 12 in winter) | -0.002 |
+| h017 | Explicit weekend/workday equality + percentage rules | -0.005 |
+| h020 | Gemini `temperature=0` for deterministic LLM | -0.002 |
+| h024 | Self-verification step at end of prompt | -0.001 |
+| h025 | Softer bell, peak ~1.5-2× avg with afternoon trail | -0.001 |
+| h027 | Anchor decision tree + capacity discount for unanchored | -0.006 |
+| h030 | Capacity-tiered discount (≤15 kWp → 0.65-0.80×) | -0.004 |
+| h032 | Universal 0.85× discount on target-month anchors | -0.005 |
+| h035 | Tighten target-month discount to 0.75-0.85 (median 0.80) | -0.004 |
 
-1. **Self-consumption fudge in description_parser**: when a description says "domácnost" or "vlastní spotřeba minimální" or names a small kWp, the parser could scale `yearly_surplus_kwh` down rather than passing it through unchanged. Aim: bring synthetic monthly closer to real monthly without changing `MONTHLY_SURPLUS_SHARE`.
-2. **Per-tier robustness**: if one tier (e.g. `popis_laik`) scores worse than `popis_zkuseny`, the parser is brittle to vague input — sharpen ratio bands in the prompt.
-3. **Solar envelope asymmetry** (`edc_generator.rb`): currently 3.5 morning / 2.5 afternoon. Czech April has long afternoons; try 3.0/3.0 or 4.0/2.0.
-4. **`MONTHLY_SURPLUS_SHARE`** (`solar_model.rb`): March=0.060 and April=0.090 in the current table. If real April export is consistently ~10× lower than `yearly × 0.090`, the share for April may be too high relative to summer months.
-5. **Daily factor range**: currently `0.1 + rand * 1.8` (0.1..1.9). Real April had cloudy stretches; try widening or adding AR(1) correlation.
-6. **Sunrise/sunset DST**: April 2026 spans DST. Confirm `SOLAR_HOURS[4]` corresponds to local time after DST jump.
+## Promising ideas not yet tried
+
+Order roughly by expected value × ease:
+
+1. **True two-pass self-critique** — first call returns draft, second call reviews against anchors and revises. ~10 min iteration (2× LLM cost). The single-pass verification (h024) gave a small win; two-pass might give more.
+2. **Schema-locked Gemini output** — use Gemini's structured-output / `response_format` if RubyLLM exposes it. Removes JSON parse failures, constrains numeric ranges. Cheap to wire.
+3. **Multi-sample ensemble** — call LLM 3× per (entry, tier), average the resulting hourly arrays. Expensive (3× cost) but smooths residual non-determinism. Only worth it if iteration budget is large.
+4. **Phase D: structured spec architecture** — LLM emits `{peak_hour, peak_kwh, monthly_total, active_window, peak_sharpness}` (~6 floats). Ruby script generates the curve from spec via Beta distribution. Tighter LLM output space, fewer hallucinations. Big refactor (~150 LOC); high ceiling but high risk.
+5. **Per-tier prompt customization** — popis_zkuseny (numerical) is currently the worst-performing tier (~0.337) vs popis_laik (~0.322). Different LLM strategy per tier?
+6. **Capacity-conditional `DAILY_FACTOR_RANGE`** — small plants have stable daily totals (low real variance), large plants have weather-driven swings. Pass capacity through and use narrower range for ≤15 kWp.
+7. **Refine `AnchorExtractor`** — extract peak intensity claims ("kolem 6 kWh/h"), specific weekend/workday percentages ("o 25 %"), holiday treatment.
+8. **Different LLM model** — try Gemini Pro vs Flash, or Claude. RubyLLM supports model swap.
+
+## Known issues / lessons
+
+- **Gemini API hangs occasionally**. If a score run goes >12 min with <10s CPU, kill the process and re-run. Cache from the partial run is saved per-completed-call. ([detailed example below])
+- **Temp=0 isn't fully deterministic** but reduces noise enough for cleanly distinguishing signal from noise on parser changes.
+- **Tier-balanced score** matters: don't optimize for popis_zkuseny alone (overfits to numerical descriptions).
+- **Customer overestimation is real** and systematic (~20-30%). The 0.80× anchor discount in current prompt addresses this.
+- **V3_03 and V3_04 are dataset-noise dominated**. Descriptions claim 2-25× the measured monthly export. Don't chase these — they cap composite around 0.32.
 
 ## Rules
 
@@ -117,17 +188,17 @@ The biggest weighted contributor is `daily_total_mape` (raw 5.41, weighted at 0.
 - Changes must be small and isolated — if the diff is over 20 lines, split it.
 - Never edit tests, data, or the scorer itself.
 - **Commit every ACCEPTED iteration.** No commit on REJECTED.
-- Never `git push` from inside the loop.
-- If you make 5 consecutive REJECTED iterations, pause and ask the user for direction.
+- Never `git push` from inside the loop. Push at session end (manually) so wattlink can `bundle update lupina`.
+- If you make 5 consecutive REJECTED iterations, pause and ask for direction.
 - Stop after 20 iterations total per run.
 
 ## Determinism
 
-The scorer uses `seed: 42` for all generator calls, so scoring is fully deterministic given the code state. Same code → same score.
+The scorer uses `seed: 42` for all generator calls. With Gemini `temperature=0`, scoring is approximately deterministic given the code state. Re-running the same code gives the same composite within ±0.001 of noise.
 
 ## Cache
 
-Parse cache lives at `eval/parse_cache/<parser_md5>/<description_md5>.json`. Editing
-`description_parser.rb` invalidates the cache (new parser_md5 → new directory) and
-re-runs the LLM for every (entry × tier) description pair = 32 Gemini calls per
-parser-touching iteration. Editing only the generator/solar code reuses the cache.
+- Hourly path: `eval/parse_cache_hourly/<parser+extractor_md5>/<key>.json`. Editing `hourly_profile_parser.rb` OR `anchor_extractor.rb` invalidates the cache (new combined md5 → new directory).
+- The cache key includes capacity, yearly_surplus, month, year, description text — so different (entry, tier) pairs hash to different files.
+- Generator-only edits (`hourly_profile_generator.rb`) reuse cached parser output → fast iteration (~10 sec for 32 cases).
+- Parser/extractor edits → 32 fresh Gemini calls (~3-8 min, sometimes slower if Gemini hangs).
