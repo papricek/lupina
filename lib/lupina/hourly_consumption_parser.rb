@@ -103,6 +103,13 @@ module Lupina
              podobné průmyslu 24/7 ale s drobnými cykly.
            Pokud popis nesektoruje, odvoď z kontextu (kapacita, denní vzorec, sezónnost).
 
+        TOPENÍ-DOMINANTNÍ specialita: pokud popis zmiňuje "topení", "vytápění",
+        "v zimě výrazně víc", nebo zimní špičku, RANNÍ peak (5-7 h) je obvykle
+        SILNĚJŠÍ než večerní — termostat reaguje na noční ochlazení a v 5-6h
+        spustí maximum. Reálná data ukazují: zimní heating-dominantní objekty
+        mají peak v 5-7 h, ne v 18-20 h. Profil je bimodální (ranní + večerní),
+        ale s ranním vrcholem.
+
         3. SEZÓNNOST. Spotřeba ČR má YEARLY share přibližně:
            leden 11.5 %, únor 10.5 %, březen 9.5 %, duben 7.5 %, květen 6.0 %, červen 5.5 %,
            červenec 5.5 %, srpen 6.0 %, září 7.5 %, říjen 9.0 %, listopad 10.5 %, prosinec 11.0 %.

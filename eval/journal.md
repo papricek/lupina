@@ -609,3 +609,12 @@ Delta: −0.0071
 Per-tier deltas: popis_laik 0.190 → 0.144 (much better!), popis_zkuseny 0.152 → 0.099.
 dmape raw 0.65 → 0.60 (-0.05). shape stable. peak slightly improved.
 Why kept: targets the V3-like overestimation issue. CV1_17/18 (Brumovice 96.5 MWh/yr xlsx but real ~810 kWh/month — 12× drop) and similar outliers benefit.
+
+## iter c006 — 2026-05-07T17:00 — ACCEPTED (marginal overall, big per-entry)
+Hypothesis: peak_time_delta is heaviest at heating-dominant entries (CV1_11/12 — real peak h5-6 due to thermostat overnight cycle, LLM puts evening peak h17-19). Add explicit prompt rule: "if popis mentions topení/vytápění/v zimě, ranní peak 5-7h is typically STRONGER than evening; thermostat reacts to overnight cooling".
+Diff: hourly_consumption_parser.rb prompt — new "TOPENÍ-DOMINANTNÍ specialita" paragraph.
+Score before: 0.1215
+Score after:  0.1214
+Delta: −0.0001 (within noise floor)
+Per-entry deltas: CV1_11 0.164 → 0.080 (-0.084, peak_delta 12 → 3.0!), CV1_12 ~0.16 → 0.075 (-0.085, peak_delta 13 → 1.25), CV1_10 0.272 → 0.209 (-0.063). Three big wins on heating cases. Small regressions elsewhere offset most of the net gain.
+Why kept: targeted rule worked exactly as intended on heating-dominant entries. Net improvement is noise-level but mechanism is sound.
