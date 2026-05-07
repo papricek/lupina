@@ -462,6 +462,47 @@ Per-entry deltas: V3_05 −0.020 (now BEATS legacy 0.242 → 0.237), V3_02 −0.
 **Hourly wins on 5 of 8 entries; ties V3_02; loses on V3_03 and V3_04. Composite hourly 0.3160 vs legacy 0.3255 — hourly leads by 0.0095.**
 Why kept: 0.85→0.80 median discount continued the customer-overestimation correction; V3_05's anchor "duben 386" now treated as ~309 → much closer to real 152.
 
+## iter h036 — 2026-05-07T10:30 — REJECTED
+Hypothesis: push discount further to 0.70-0.80 (median 0.75×).
+Diff: hourly_profile_parser.rb prompt rule 1.
+Score before: 0.3160
+Score after:  0.3198
+Delta: +0.0038
+Why: V3_02 +0.017, V3_05 +0.007, V3_06 +0.008. 0.75 too aggressive — over-discounted cases where anchor was reasonable. h035's 0.80 is the sweet spot.
+
+## iter h037 — 2026-05-07T11:00 — REJECTED
+Hypothesis: add cross-check rule — if monthly anchor > yearly × month_share × 1.5, distrust anchor and use yearly-based estimate. Targets V3_03 ("13 MWh April" claim, yearly implies max ~8.6 MWh).
+Diff: hourly_profile_parser.rb prompt rule 1 — added "KŘÍŽOVÁ KONTROLA" sub-rule.
+Score before: 0.3160
+Score after:  0.3204
+Delta: +0.0044
+Why: V3_02 +0.014, V3_05 +0.013, V3_07 +0.013. The cross-check pushed reasonable anchors to yearly-based estimate, hurting cases where description anchor was correct. V3_03 marginally improved but not enough to offset.
+
+## SESSION 2 END — 18 of 20 iterations consumed
+
+**Final running best: 0.3160** (down from session 1 end 0.3390, Δ −0.0230)
+**Beats legacy 0.3255 by 0.0095** (3% relative improvement)
+**5 of 8 entries beat legacy** (V3_01, V3_05, V3_06, V3_07, V3_08; tie V3_02; lose V3_03, V3_04)
+**Total all sessions: 0.3736 → 0.3160** (Δ −0.058, 15.5% relative improvement on the new path)
+
+Key wins this session:
+- h020: Gemini temperature=0 — deterministic LLM, eliminated cache-reroll noise
+- h024: explicit self-verification step in prompt
+- h025: softer bell curve (peak 1.5-2× avg, not 2-3×)
+- h027: anchor decision tree + capacity discount for unanchored domestic plants  (-0.0064)
+- h030: capacity-tiered discount (≤15 kWp → 0.65-0.80×) — first iteration to BEAT legacy (-0.0040)
+- h032: universal 0.85× discount on target-month anchors (customer overestimation) (-0.0046)
+- h035: tighten discount to 0.75-0.85 (median 0.80) (-0.0040)
+
+Lessons:
+- LLM stochasticity is real — temp=0 is necessary for clean autoresearch on parser changes
+- Customer descriptions systematically overestimate by 20-30% — universal discount works
+- Capacity-based heuristics (vs keyword matching) are more robust
+- Specific real-data examples in prompts overfit; abstract guidance generalizes
+- Each "discount" tightening had diminishing returns past 0.80 median
+
+Remaining gap to legacy on V3_03 and V3_04 is dataset-noise dominated — descriptions claim 2.5-25× the measured monthly export. No prompt change can reconcile that without ground truth access.
+
 ## SESSION 1 END — 20 iterations consumed
 
 Final running best: **0.3390** (down from baseline 0.3736, Δ −0.0346, 9.3% relative).
