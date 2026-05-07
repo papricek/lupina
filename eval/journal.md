@@ -628,3 +628,51 @@ Delta: −0.0044
 Per-tier: popis_laik 0.144 → 0.136, popis_zkuseny 0.098 → 0.098 (stable).
 Components: peak_time_delta 3.55 → 2.99 (big improvement!), dmape 0.60 → 0.59. variance 0.72 → 0.70.
 Why kept: same dynamic as V3 production h032 — universal customer-overestimation correction. The peak_time_delta improvement is unexpected (probably the discount aligns curve totals so the LLM places peak more correctly).
+
+## iter c008 — 2026-05-07T18:45 — REJECTED
+Hypothesis: tighten unanchored discount 0.85 → 0.80.
+Score: 0.1170 → 0.1190 (+0.0020). Over-discount; 0.85 is sweet spot.
+
+## iter c009 — 2026-05-07T19:00 — REJECTED
+Hypothesis: tighten CONSUMPTION_QUARTER_NOISE_RANGE 0.95-1.05 → 0.97-1.03.
+Score: 0.1170 → 0.1177 (+0.0007). Within noise; revert.
+
+## iter c010 — 2026-05-07T19:30 — REJECTED
+Hypothesis: mirror V3's anchor-discount pattern; apply 0.85× to ★ target-month anchor too.
+Score: 0.1170 → 0.1240 (+0.0070). popis_zkuseny went 0.098 → 0.109 — direct anchors in CV1 are RELIABLE (auto-generated from real data), unlike V3 customer-stated anchors. Different bias direction.
+
+## iter c011 — 2026-05-07T20:30 — REJECTED
+Hypothesis: improve sector detection in extractor with narrative-pattern fallback for LAIK descriptions ("naplno + víkend" → industrial 24/7, "pracovní týden + víkend útlum" → office, "ráno + večer + topení" → residential).
+Diff: consumption_anchor_extractor.rb#detect_sector — added 3 narrative patterns.
+Score: 0.1170 → 0.1176 (+0.0006). Within noise. The patterns didn't reclassify enough cases to move composite.
+
+## SESSION END — 11 iterations consumed (5 ACCEPTED, 6 REJECTED)
+
+**Final running best: 0.1170** (down from baseline 0.1710, Δ −0.054, 31.6% relative).
+
+Components final:
+- daily_total_mape: 0.59 (was 0.76)
+- hourly_shape_mae: 0.21 (was 0.22)
+- peak_time_delta: 2.99 (was 3.6 — heating rule helped)
+- weekday_ratio_error: 0.03 (already near-perfect)
+- autocorr_distance: 0.06 (already low)
+- variance_ratio_error: 0.70 (was 1.70 — biggest single-iter win c001)
+
+Per-tier final:
+- popis_laik: 0.136 (was 0.190 — focus tier, real users will write this style)
+- popis_zkuseny: 0.098 (was 0.152)
+
+Accepted iterations:
+- c001: narrower DAILY_FACTOR + QUARTER_NOISE for consumption (-0.0413, biggest)
+- c003: DAILY_FACTOR 0.85-1.15 → 0.80-1.20 (-0.0011, marginal)
+- c005: parser yearly × 0.90 discount unanchored (-0.0071)
+- c006: heating-dominant morning peak rule (-0.0001 marginal, big per-entry on CV1_10/11/12)
+- c007: discount 0.90 → 0.85 (-0.0044)
+
+Lessons:
+- Consumption needs MUCH narrower extrapolation knobs than production (real consumers stable).
+- Yearly discount works on CV1 too but is a different bias direction (historical aggregate vs current month) than V3's customer-overestimation.
+- Sector-specific peak rules (heating-dominant) work when applied to small targeted cohorts.
+- Direct monthly anchors in CV1 are RELIABLE (auto-generated), so don't apply universal anchor discount as we did in V3.
+
+Remaining headroom is small (~0.01-0.02). CV1_17/18 (Brumovice 96.5 MWh xlsx vs ~810 kWh real — 12× drop) are dataset-noise dominated.
