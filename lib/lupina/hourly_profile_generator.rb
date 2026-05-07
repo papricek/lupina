@@ -32,7 +32,8 @@ module Lupina
     INTRA_HOUR_SHAPE = [ 1.0, 1.0, 1.0, 1.0 ].freeze
 
     def initialize(workday_kwh_per_hour:, weekend_kwh_per_hour:, holiday_kwh_per_hour: nil,
-                   month:, year: Date.today.year, ean: "859182400110224391", seed: nil)
+                   month:, year: Date.today.year, ean: "859182400110224391", seed: nil,
+                   daily_factor_range: nil, quarter_noise_range: nil)
       @workday  = workday_kwh_per_hour.dup
       @weekend  = weekend_kwh_per_hour.dup
       @holiday  = holiday_kwh_per_hour&.dup || @weekend
@@ -40,6 +41,8 @@ module Lupina
       @year  = year.to_i
       @ean = ean
       @rng = seed ? Random.new(seed) : Random.new
+      @daily_factor_range  = daily_factor_range  || DAILY_FACTOR_RANGE
+      @quarter_noise_range = quarter_noise_range || QUARTER_NOISE_RANGE
       @stats = {}
     end
 
@@ -53,7 +56,7 @@ module Lupina
       (1..days_in_month).each do |day|
         date = Date.new(@year, @month, day)
         profile = select_profile(date)
-        daily_factor = sample(DAILY_FACTOR_RANGE)
+        daily_factor = sample(@daily_factor_range)
 
         24.times do |hour|
           hourly_kwh = profile[hour].to_f * daily_factor
@@ -91,7 +94,7 @@ module Lupina
 
     def distribute_hour(hourly_kwh)
       base = hourly_kwh / 4.0
-      INTRA_HOUR_SHAPE.map { |w| base * w * sample(QUARTER_NOISE_RANGE) }
+      INTRA_HOUR_SHAPE.map { |w| base * w * sample(@quarter_noise_range) }
     end
 
     def sample(range)

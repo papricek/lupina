@@ -117,6 +117,11 @@ module Lupina
       ).call
     end
 
+    # Tunable knob: consumers have stable daily totals (vs solar plants which
+    # have weather-driven swings). Narrow daily-factor range here.
+    CONSUMPTION_DAILY_FACTOR_RANGE  = (0.85..1.15).freeze
+    CONSUMPTION_QUARTER_NOISE_RANGE = (0.95..1.05).freeze
+
     def generate_edc_consumption_hourly(description:, yearly_consumption_kwh:, month:, year: Date.today.year,
                                         ean: "859182400110224391", seed: nil, parsed: nil)
       parsed ||= parse_consumption_hourly_profile(description,
@@ -126,7 +131,9 @@ module Lupina
         workday_kwh_per_hour: parsed["workday_kwh_per_hour"],
         weekend_kwh_per_hour: parsed["weekend_kwh_per_hour"],
         holiday_kwh_per_hour: parsed["holiday_kwh_per_hour"],
-        month: month, year: year, ean: ean, seed: seed
+        month: month, year: year, ean: ean, seed: seed,
+        daily_factor_range:  CONSUMPTION_DAILY_FACTOR_RANGE,
+        quarter_noise_range: CONSUMPTION_QUARTER_NOISE_RANGE
       )
       csv = generator.generate
       { csv: csv, stats: generator.stats, parsed: parsed }

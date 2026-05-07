@@ -308,7 +308,7 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
 RUNNING BEST (hourly path): 0.3160 at 2026-05-07T10:00 (h035 — tighter 0.75-0.85 anchor discount, beats legacy by 0.0095, 5/8 entries win)
-RUNNING BEST (hourly_consumption path): 0.1710 at 2026-05-07T13:00 (initial baseline, no tuning yet — descriptions are well-matched to real data)
+RUNNING BEST (hourly_consumption path): 0.1297 at 2026-05-07T14:30 (c001 — narrower DAILY_FACTOR + QUARTER_NOISE for consumption)
 
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
@@ -576,3 +576,11 @@ Per-tier focus: popis_laik is what real users will write, so optimize for
 laik even at small cost to zkuseny.
 
 ## CV1 iterations (cN001+)
+
+## iter c001 — 2026-05-07T14:30 — ACCEPTED — biggest single-iter win
+Hypothesis: shared HourlyProfileGenerator uses DAILY_FACTOR_RANGE (0.20..1.80) tuned for production V3 weather variation; consumers (especially industrial 24/7 and offices) have stable daily totals → variance_ratio 1.70 raw is pure overshoot. Add per-call `daily_factor_range:` + `quarter_noise_range:` parameters, pass narrower 0.85..1.15 / 0.95..1.05 from `generate_edc_consumption_hourly`.
+Diff: hourly_profile_generator.rb (new optional initializer params, defaults preserved); lupina.rb (consumption method passes narrower ranges).
+Score before: 0.1710 (var=1.70, dmape=0.76, shape=0.22, peak=3.6)
+Score after:  0.1297 (var=0.79, dmape=0.65, shape=0.22, peak=3.7)
+Delta: −0.0413
+Why kept: massive variance_ratio reduction (-0.91 raw), bonus dmape improvement from less overshoot (-0.11 raw). Production V3 path untouched (defaults preserved). Confirms: consumption needs different extrapolation knobs than production.
