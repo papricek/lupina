@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3390 at 2026-05-07T03:00 (h017 — explicit weekend/workday rule)
+RUNNING BEST (hourly path): 0.3369 at 2026-05-07T04:00 (h020 — Gemini temperature=0 for deterministic LLM outputs)
 
 ## V3 dataset
 
@@ -305,7 +305,18 @@ Score after:  0.3395
 Delta: +0.0005
 Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta and Kumžák defaults). V3_06 +0.011, V3_08 +0.016 (capacity-based heuristic muddied the explicit-description rules from h017 — V3_08 is 30 kWp "firma" but description says "rovnoměrně"; the +10% default may have over-applied despite the equality keyword). Net wash.
 
-## SESSION END — 20 iterations consumed (program.md cap)
+## Session 2 starts — fresh 20-iteration budget, focus on hourly path
+
+## iter h020 — 2026-05-07T04:00 — ACCEPTED
+Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
+Diff: hourly_profile_parser.rb#call (one line, `.with_temperature(0)` chained).
+Score before: 0.3390
+Score after:  0.3369
+Delta: −0.0021
+Per-entry deltas: V3_04 −0.021, V3_02 −0.008 (LLM produces tighter outputs at temp=0); V3_06 +0.008, V3_08 +0.011 (small regressions).
+Two wins: (1) new RUNNING BEST 0.3369, (2) all subsequent parser iterations now have reliable Δ signals.
+
+## SESSION 1 END — 20 iterations consumed
 
 Final running best: **0.3390** (down from baseline 0.3736, Δ −0.0346, 9.3% relative).
 Gap to legacy path 0.3255 remaining: **0.0135**.

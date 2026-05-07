@@ -29,7 +29,7 @@ module Lupina
     end
 
     def call
-      chat = RubyLLM.chat(model: @model)
+      chat = RubyLLM.chat(model: @model).with_temperature(0)
       response = chat.ask(prompt)
       parsed = JSON.parse(extract_json(response.content))
       validate!(parsed)
