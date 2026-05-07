@@ -137,6 +137,17 @@ module Lupina
           v dubnu = ~6 MWh/rok), VĚŘ POPISU a vyrob hodinové hodnoty odpovídající popisu.
           Důvod uveď v "reasoning".
 
+        VERIFIKACE PŘED ODESLÁNÍM (tichá kontrola, neuváděj v reasoning):
+        Před finálním JSONem si zkontroluj:
+        a) Součet (workday_kwh × počet_všedních_dní + weekend_kwh × počet_víkendů) ≈ expected_monthly_kwh (±5 %).
+           Pokud se liší, uprav hodinové hodnoty tak, ať součet sedí.
+        b) Hodina maxima leží uvnitř popisem stanovené špičky (pokud popis říká špičku).
+           Pokud je peak jinde, posuň ho.
+        c) V noci (před východem / po západu slunce) jsou hodnoty 0.
+           Pokud má LLM v noci nenulu, vynuluj.
+        d) Pokud popis říká "rovnoměrně" nebo "stejně", weekend = workday přesně (kopie pole).
+        e) V detekovaných kotvách (★ označený CÍLOVÝ MĚSÍC měsíční úhrn) ladí výsledek do ±10 %.
+
         Vrať POUZE validní JSON, bez markdownu, bez komentářů:
 
         {

@@ -307,6 +307,8 @@ Per-entry deltas: V3_05 −0.013, V3_07 −0.009 (small-plant rule fixed Vachta 
 
 ## Session 2 starts — fresh 20-iteration budget, focus on hourly path
 
+RUNNING BEST (hourly path): 0.3355 at 2026-05-07T05:00 (h024 — self-verification in prompt)
+
 ## iter h020 — 2026-05-07T04:00 — ACCEPTED
 Hypothesis: parser-iteration scoring was confounded by LLM stochasticity (cache invalidates on parser change → fresh non-deterministic Gemini outputs → ±0.005-0.010 score noise per iter). Set Gemini temperature=0 via `RubyLLM.chat(...).with_temperature(0)` for deterministic outputs.
 Diff: hourly_profile_parser.rb#call (one line, `.with_temperature(0)` chained).
@@ -315,6 +317,40 @@ Score after:  0.3369
 Delta: −0.0021
 Per-entry deltas: V3_04 −0.021, V3_02 −0.008 (LLM produces tighter outputs at temp=0); V3_06 +0.008, V3_08 +0.011 (small regressions).
 Two wins: (1) new RUNNING BEST 0.3369, (2) all subsequent parser iterations now have reliable Δ signals.
+
+## iter h021 — 2026-05-07T04:15 — REJECTED
+Hypothesis: extract bare numbers after month names ("duben 386" without unit) as kWh anchors when description has at least one explicit kWh elsewhere.
+Diff: anchor_extractor.rb#extract_monthly_totals — added bare-number fallback pass.
+Score before: 0.3369
+Score after:  0.3393
+Delta: +0.0024
+Why: V3_04 +0.019. Extracted "duben 386" pushed LLM's March extrapolation higher than reality (Vachta's description claims ~2.5× real). Bare-number extraction works when description matches reality, hurts when it doesn't.
+
+## iter h022 — 2026-05-07T04:30 — REJECTED
+Hypothesis: detect upper-bound prefixes ("pod X", "do X", "max X", "méně než X") and label as "≤ X" instead of treating as exact.
+Diff: anchor_extractor.rb — bound flag in amounts + format_for_prompt distinction.
+Score before: 0.3369
+Score after:  0.3406
+Delta: +0.0037
+Why: counter-intuitive — telling LLM "leden ≤ 250 (HORNÍ LIMIT)" instead of "leden = 250" made it interpolate higher for spring months. Without the fixed cap, LLM defaulted to yearly-share interpolation. Original "exact" treatment was serving as a useful winter ceiling.
+
+## iter h023 — 2026-05-07T04:45 — REJECTED
+Hypothesis: 3-tap [0.25, 0.5, 0.25] Gaussian smoothing on workday/weekend hourly arrays before extrapolation reduces LLM jitter.
+Diff: hourly_profile_generator.rb#initialize + new smooth method.
+Score before: 0.3369
+Score after:  0.3391
+Delta: +0.0022
+Why: shape_mae went 0.560 → 0.573. LLM outputs at temp=0 are already smooth; further smoothing flattens peak structure.
+
+## iter h024 — 2026-05-07T05:00 — ACCEPTED
+Hypothesis: add explicit self-verification step at end of prompt — LLM should silently check (a) total matches expected_monthly_kwh, (b) peak hour inside stated špička, (c) night values are 0, (d) "rovnoměrně" → weekend = workday exactly, (e) ★ target-month anchor matches output ±10%. Single LLM call, no extra cost.
+Diff: hourly_profile_parser.rb prompt — added "VERIFIKACE PŘED ODESLÁNÍM" section (~10 lines).
+Score before: 0.3369
+Score after:  0.3355
+Delta: −0.0014
+Per-entry deltas: V3_06 −0.008, V3_07 −0.009 (Kumžák domestic — the verification step caught small inconsistencies in the curve and tightened them).
+Components: variance_ratio 1.144 → 1.125 (improvement). shape_mae stable. dmape stable (capped).
+Why kept: clean improvement on well-fitting cases. The verification reasoning steers the LLM toward internal consistency without changing total output count.
 
 ## SESSION 1 END — 20 iterations consumed
 
