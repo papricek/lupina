@@ -11,6 +11,7 @@ require_relative "lupina/day_resolver"
 require_relative "lupina/edc_generator"
 require_relative "lupina/consumption_edc_generator"
 require_relative "lupina/description_parser"
+require_relative "lupina/anchor_extractor"
 require_relative "lupina/hourly_profile_parser"
 require_relative "lupina/hourly_profile_generator"
 

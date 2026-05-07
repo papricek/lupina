@@ -1,7 +1,7 @@
 # Autoresearch journal — V3 dataset
 
 RUNNING BEST (legacy path): 0.3255 at 2026-05-06T00:00 (unmodified lupina at the V3 harness commit)
-RUNNING BEST (hourly path): 0.3465 at 2026-05-06T02:42 (h007 — sharper-bell instruction in parser)
+RUNNING BEST (hourly path): 0.3455 at 2026-05-07T01:00 (h010 — anchor preprocessing with calibration framing)
 
 ## V3 dataset
 
@@ -201,5 +201,23 @@ Score before: 0.3465
 Score after:  0.3468
 Delta: +0.0003
 Why: marginal regression. The DAILY_FACTOR_RANGE knob is fully exhausted at 0.20..1.80 — gradient is essentially flat in either direction now.
+
+## iter h009 — 2026-05-07T00:30 — REJECTED
+Hypothesis: preprocess descriptions to extract numeric anchors (monthly totals, daily totals, peak/active windows, weekend/workday ratio) and prepend to LLM prompt with strong "MUSÍ je respektovat" framing.
+Diff: new lib/lupina/anchor_extractor.rb (~150 lines), parser prepends extracted block, score keys cache on both files.
+Score before: 0.3465
+Score after:  0.3482
+Delta: +0.0017
+Per-entry deltas: V3_01..V3_05 mostly improved (-0.043 sum), but V3_06 +0.043 and V3_07 +0.007 (Kumžák regression). The strict "MUSÍ" framing forced the LLM into a tight interpolation off "srpen 900 / leden 250" anchors that overrode its previous correct seasonal reasoning. Reverted; rebuilding with milder framing.
+
+## iter h010 — 2026-05-07T01:00 — ACCEPTED
+Hypothesis: same anchor preprocessing as h009 but with softer framing — "kalibrační signály ... pomocné anchory" instead of "MUSÍ respektovat", and dropping the explicit weekend/workday ratio (was over-applied).
+Diff: new lib/lupina/anchor_extractor.rb, parser prepends block, score keys cache on both files. ~5 lines diff in parser, ~150 lines new in extractor.
+Score before: 0.3465
+Score after:  0.3455
+Delta: −0.0010
+Per-entry deltas: V3_04 −0.024, V3_03 −0.009, V3_01 −0.003 (entries with rich numeric anchors improved). V3_06 +0.013, V3_07 +0.016 (Kumžák still slightly worse than no-anchors h007 — the seasonal-reference anchors "leden 250 / srpen 900" still drift the LLM's interpolation a bit, but less catastrophically).
+Components: shape_mae 0.576 → 0.562 (-0.014, the biggest mover). Net win is real but small.
+Why kept: improvement on the entries where numeric anchors actually exist in the description; small regression elsewhere is offset.
 
 

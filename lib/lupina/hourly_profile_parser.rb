@@ -54,6 +54,9 @@ module Lupina
         "Roční přetoky neznáme, odhadni z popisu."
       end
 
+      anchors = AnchorExtractor.call(@description)
+      anchor_block = AnchorExtractor.format_for_prompt(anchors, target_month: @month)
+
       <<~PROMPT
         Jsi expert na české fotovoltaické instalace, energetiku a 15min EDC data.
         Tvoje úloha: odhadnout PROFIL PŘETOKŮ pro jeden konkrétní měsíc v ABSOLUTNÍCH KWH PER HODINU.
@@ -63,7 +66,7 @@ module Lupina
         Špičkový výkon FVE: #{@capacity_kwp} kWp
         #{yearly_hint}
 
-        Popis zákazníka:
+        #{anchor_block}Popis zákazníka:
         "#{@description}"
 
         ÚKOL:

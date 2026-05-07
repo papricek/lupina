@@ -10,12 +10,17 @@ DATASET_ROOT = File.expand_path("../dataset", __dir__)
 PATH = ENV.fetch("LUPINA_PATH", "legacy")  # "legacy" or "hourly"
 CACHE_ROOT   = File.expand_path("../parse_cache#{PATH == 'hourly' ? '_hourly' : ''}", __dir__)
 REPORT_PATH  = File.expand_path("../score#{PATH == 'hourly' ? '_hourly' : ''}.json", __dir__)
-PARSER_PATH = if PATH == "hourly"
-  File.expand_path("../../lib/lupina/hourly_profile_parser.rb", __dir__)
+PARSER_PATHS = if PATH == "hourly"
+  [
+    File.expand_path("../../lib/lupina/hourly_profile_parser.rb", __dir__),
+    File.expand_path("../../lib/lupina/anchor_extractor.rb", __dir__)
+  ]
 else
-  File.expand_path("../../lib/lupina/description_parser.rb", __dir__)
+  [ File.expand_path("../../lib/lupina/description_parser.rb", __dir__) ]
 end
-PARSER_HASH = File.exist?(PARSER_PATH) ? Digest::MD5.hexdigest(File.read(PARSER_PATH))[0, 8] : "unknown"
+PARSER_HASH = PARSER_PATHS.select { |p| File.exist?(p) }
+                          .map { |p| File.read(p) }
+                          .then { |c| c.empty? ? "unknown" : Digest::MD5.hexdigest(c.join)[0, 8] }
 
 WEIGHTS = {
   daily_total_mape:    0.25,
