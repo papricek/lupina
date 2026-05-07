@@ -121,9 +121,13 @@ module Lupina
            3) Existují JINÉ MĚSÍCE kotev (sezónní reference)? ANO → odvoď cílový měsíc
               z měsíčních podílů: duben/srpen ~ 0.65, březen/srpen ~ 0.40, listopad/srpen ~ 0.10.
               Konzervativně: spíš nižší konec rozsahu.
-           4) Žádné kotvy? POUŽIJ yearly × měsíční podíl, ale když je popis "domácnost",
-              "rodinný dům", "malá", aplikuj DEFAULT discount 0.7-0.8× (lidé spotřebují víc
-              než zákazník odhaduje při hlášení ročního přetoku).
+           4) Žádné kotvy? POUŽIJ yearly × měsíční podíl, pak DISCOUNT podle typu:
+              - kapacita ≤ 15 kWp NEBO popis říká "domácí FVE / rodinný dům / domácnost /
+                menší FVE / malá": multiplikátor 0.65-0.80× (typicky 0.75)
+              - kapacita 15-50 kWp NEBO "menší firma / dílna / kanceláře": multiplikátor 0.80-0.90×
+              - kapacita > 50 kWp NEBO "továrna / FVE bez vlastní spotřeby": multiplikátor 0.90-1.00×
+              Důvod: zákazníci pravidelně NADHODNOCUJÍ roční přetok (uvádějí výrobu místo přetoku
+              nebo loňský dobrý rok). Konzervativní discount kompenzuje tento systematický bias.
         6. Pokud popis říká "východně orientované panely" nebo "ranní špička",
            posuň vrchol křivky před poledne.
            Jinak je vrchol křivky:
