@@ -194,4 +194,12 @@ Per-entry deltas: V3_06 −0.048, V3_07 −0.033 (the two domestic cases moved c
 Components: shape_mae 0.59 → 0.58 (slight); peak_time_delta 1.92 → 1.72 (notable); weekday_ratio_error 0.40 → 0.44 (mild regression — perhaps the sharper-peak instruction reduced the LLM's emphasis on weekend/workday split; worth watching).
 Why kept: largest gain since h004. Closes most of the gap to legacy on small-plant entries. Total progress this session 0.3736 → 0.3465 (-0.027). Legacy is at 0.3255 — gap now ~0.02.
 
+## iter h008 — 2026-05-06T02:46 — REJECTED
+Hypothesis: h007's prompt changes shifted the LLM's curves; the optimal DAILY_FACTOR_RANGE may have shifted. Try slightly narrower 0.25..1.75.
+Diff: hourly_profile_generator.rb:13
+Score before: 0.3465
+Score after:  0.3468
+Delta: +0.0003
+Why: marginal regression. The DAILY_FACTOR_RANGE knob is fully exhausted at 0.20..1.80 — gradient is essentially flat in either direction now.
+
 
